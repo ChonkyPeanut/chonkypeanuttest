@@ -98,7 +98,9 @@ function update() {
   if (player.x + player.width > canvas.width) {
     player.x = canvas.width - player.width;
   }
-for (let block of blocks) {
+
+  //blocks code
+  for (let block of blocks) {
   if (block.isFalling) {
     block.vy += 0.5; // gravity
     block.y += block.vy;
@@ -125,6 +127,7 @@ for (let block of blocks) {
       }
     }
   }
+}
 }
 
 function draw() {
