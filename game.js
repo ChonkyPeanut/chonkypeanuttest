@@ -32,17 +32,29 @@ document.addEventListener("keydown", (e) => {
   if (keys.hasOwnProperty(e.key)) keys[e.key] = true;
 
   if (e.key === "1") {
-    // Place a block at player's current position
-    blocks.push({
-      x: Math.floor(player.x / 50) * 50,
-      y: Math.floor((player.y + player.height) / 50) * 50,
-      width: 50,
-      height: 50,
-      color: "white"
-    });
+  // Calculate block position snapped to 50x50 grid
+  let blockX = Math.floor(player.x / 50) * 50;
+  let blockY = Math.floor((player.y + player.height - 1) / 50) * 50;  // subtract 1 to keep it inside floor
+
+  // Don't place block below the floor
+  if (blockY + 50 > canvas.height) {
+    blockY = canvas.height - 50;
   }
+
+  blocks.push({
+    x: blockX,
+    y: blockY,
+    width: 50,
+    height: 50,
+    color: "gray"
+  });
+}
 });
 
+const alreadyExists = blocks.some(b => b.x === blockX && b.y === blockY);
+if (!alreadyExists) {
+  blocks.push({ x: blockX, y: blockY, width: 50, height: 50, color: "gray" });
+}
 
 function update() {
   // Horizontal movement
