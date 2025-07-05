@@ -143,7 +143,6 @@
   let elapsedTime = 0;
   let lastFrameTime = 0;
   let startTime = 0;
-  let shootCooldown = 0;
   let lastEnemySpawn = 0;
   let enemySpawnInterval = 1000;
   let lastPowerupSpawn = 0;
@@ -234,6 +233,9 @@
 
   // --- Enemies ---
   const enemies = [];
+
+  // --- Enemy bullets ---
+  const enemyBullets = [];
 
   // --- Particles ---
   const particles = [];
@@ -369,7 +371,7 @@
 
   // --- Enemy class ---
   class Enemy {
-    constructor(x, y, radius, speed, color, health=1, isBoss=false) {
+    constructor(x, y, radius, speed, color, health=1, isBoss=false, type='normal') {
       this.x = x;
       this.y = y;
       this.radius = radius;
@@ -379,14 +381,43 @@
       this.isBoss = isBoss;
       this.maxHealth = health;
       this.damage = isBoss ? 30 : (health > 2 ? 20 : 10);
+      this.type = type;
+      this.shield = 0;    // for shielded enemies
+      this.splitCount = 0; // for splitter enemies
+      this.fireCooldown = 0; // for shooter enemies
+      this.fireRate = 1500; // ms
+      this.fireBulletSpeed = 7;
+      this.flameTrail = []; // for flame enemies
     }
 
     update() {
+      if(this.type === 'shooter') {
+        this.fireCooldown -= 16;
+        if(this.fireCooldown <= 0) {
+          this.fireCooldown = this.fireRate;
+          this.shootAtPlayer();
+        }
+      }
+      if(this.type === 'flame') {
+        this.leaveFlameTrail();
+      }
+
+      // Movement: generally move toward player
       let dx = player.x - this.x;
       let dy = player.y - this.y;
       let dist = Math.sqrt(dx*dx + dy*dy);
       dx /= dist;
       dy /= dist;
+
+      if(this.type === 'shielded') {
+        // Move a bit slower when shielded
+        this.speed = 1.5;
+      } else if(this.type === 'flame') {
+        this.speed = 2.5;
+      } else if(this.type === 'shooter') {
+        this.speed = 2;
+      }
+
       this.x += dx * this.speed;
       this.y += dy * this.speed;
 
@@ -395,6 +426,33 @@
         createExplosion(this.x, this.y, this.color);
         enemies.splice(enemies.indexOf(this), 1);
         damagePlayer(this.damage);
+      }
+    }
+
+    shootAtPlayer() {
+      let dx = player.x - this.x;
+      let dy = player.y - this.y;
+      let dist = Math.sqrt(dx*dx + dy*dy);
+      dx /= dist;
+      dy /= dist;
+
+      enemyBullets.push({
+        x: this.x + dx * this.radius,
+        y: this.y + dy * this.radius,
+        vx: dx * this.fireBulletSpeed,
+        vy: dy * this.fireBulletSpeed,
+        radius: 5,
+        color: '#a0a',
+        damage: 10
+      });
+      playSound('shoot');
+    }
+
+    leaveFlameTrail() {
+      this.flameTrail.push({ x: this.x, y: this.y, life: 30 });
+      for(let i = this.flameTrail.length - 1; i >= 0; i--) {
+        this.flameTrail[i].life--;
+        if(this.flameTrail[i].life <= 0) this.flameTrail.splice(i, 1);
       }
     }
 
@@ -416,76 +474,156 @@
       ctx.arc(this.x + this.radius/3, this.y - this.radius/3, this.radius/10, 0, Math.PI*2);
       ctx.fill();
 
-      // Boss health bar
-      if(this.isBoss) {
-        ctx.fillStyle = '#222';
-        ctx.fillRect(this.x - this.radius, this.y - this.radius - 20, this.radius * 2, 10);
-        ctx.fillStyle = '#f00';
-        const hpWidth = (this.health / this.maxHealth) * this.radius * 2;
-        ctx.fillRect(this.x - this.radius, this.y - this.radius - 20, hpWidth, 10);
+      // Shield for shielded enemies
+      if(this.type === 'shielded' && this.shield > 0) {
+        ctx.strokeStyle = '#00f';
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius + 5, 0, Math.PI*2);
+        ctx.stroke();
+      }
+
+      // Health bar
+      const healthPct = this.health / this.maxHealth;
+      ctx.fillStyle = 'black';
+      ctx.fillRect(this.x - this.radius, this.y - this.radius - 12, this.radius * 2, 6);
+      ctx.fillStyle = '#0f0';
+      ctx.fillRect(this.x - this.radius, this.y - this.radius - 12, this.radius * 2 * healthPct, 6);
+
+      // Flame trail (for flame enemies)
+      if(this.type === 'flame') {
+        this.flameTrail.forEach(f => {
+          ctx.fillStyle = `rgba(255, 100, 0, ${f.life / 30})`;
+          ctx.beginPath();
+          ctx.arc(f.x, f.y, 10, 0, Math.PI*2);
+          ctx.fill();
+        });
       }
     }
   }
 
   // --- Spawn enemy ---
-  function spawnEnemy(type = 'normal') {
-    const side = Math.floor(randRange(0, 4));
+  function spawnEnemy(type='normal') {
+    const edge = Math.floor(randRange(0, 4)); // 0:top, 1:right, 2:bottom, 3:left
     let x, y;
-    if(side === 0) { x = randRange(0, W); y = -30; }
-    else if(side === 1) { x = W + 30; y = randRange(0, H); }
-    else if(side === 2) { x = randRange(0, W); y = H + 30; }
-    else { x = -30; y = randRange(0, H); }
+    switch(edge) {
+      case 0: x = randRange(0, W); y = -30; break;
+      case 1: x = W + 30; y = randRange(0, H); break;
+      case 2: x = randRange(0, W); y = H + 30; break;
+      case 3: x = -30; y = randRange(0, H); break;
+    }
+
+    let enemy;
 
     switch(type) {
       case 'normal':
-        enemies.push(new Enemy(x, y, randRange(15,25), randRange(1,3), '#f00', 1));
+        enemy = new Enemy(x, y, 15, 2, '#f00', 3, false, 'normal');
         break;
       case 'fast':
-        enemies.push(new Enemy(x, y, 15, randRange(3,5), '#f80', 1));
+        enemy = new Enemy(x, y, 12, 4, '#f80', 2, false, 'fast');
         break;
       case 'tank':
-        enemies.push(new Enemy(x, y, 35, 0.7, '#a00', 5));
+        enemy = new Enemy(x, y, 25, 1, '#800000', 15, false, 'tank');
+        break;
+      case 'shooter':
+        enemy = new Enemy(x, y, 18, 2, '#a0a', 6, false, 'shooter');
+        enemy.fireCooldown = enemy.fireRate;
+        break;
+      case 'splitter':
+        enemy = new Enemy(x, y, 14, 3, '#0a0', 2, false, 'splitter');
+        enemy.splitCount = 1; // number of splits on death
+        break;
+      case 'shielded':
+        enemy = new Enemy(x, y, 20, 1.5, '#00f', 8, false, 'shielded');
+        enemy.shield = 8; // shield hp
+        break;
+      case 'flame':
+        enemy = new Enemy(x, y, 16, 2.5, '#fa5', 5, false, 'flame');
         break;
       case 'boss':
-        enemies.push(new Enemy(x, y, 70, 1.2, '#800', 150, true));
-        playSound('bossRoar');
+        enemy = new Enemy(x, y, 40, 1.2, '#800000', 40, true, 'boss');
         break;
+      default:
+        enemy = new Enemy(x, y, 15, 2, '#f00', 3, false, 'normal');
     }
+
+    enemies.push(enemy);
   }
 
-  // --- Bullets update and collision ---
+  // --- Update bullets ---
   function updateBullets() {
     for(let i = bullets.length - 1; i >= 0; i--) {
       const b = bullets[i];
-
       b.x += b.vx;
       b.y += b.vy;
 
       // Remove bullet if out of bounds
-      if(b.x < -50 || b.x > W+50 || b.y < -50 || b.y > H+50) {
+      if(b.x < -50 || b.x > W + 50 || b.y < -50 || b.y > H + 50) {
         bullets.splice(i, 1);
         continue;
       }
 
-      // Check collision with enemies
-      for(let j = enemies.length -1; j >= 0; j--) {
+      // Check collisions with enemies
+      for(let j = enemies.length - 1; j >= 0; j--) {
         const e = enemies[j];
         const dx = b.x - e.x;
         const dy = b.y - e.y;
         if(Math.sqrt(dx*dx + dy*dy) < b.radius + e.radius) {
-          e.health -= b.damage;
-          playSound('hit');
-          createParticle(b.x, b.y, '#ff0');
-          bullets.splice(i, 1);
-          if(e.health <= 0) {
-            createExplosion(e.x, e.y, e.color);
-            enemies.splice(j, 1);
-            score += e.isBoss ? 100 : 10;
-            // Spawn powerup occasionally on enemy death
-            if(Math.random() < 0.25) spawnPowerup(e.x, e.y);
+          if(e.type === 'shielded' && e.shield > 0) {
+            e.shield -= b.damage;
+            playSound('hit');
+            createParticle(b.x, b.y, '#00f');
+            bullets.splice(i, 1);
+            if(e.shield <= 0) {
+              e.shield = 0;
+              playSound('powerup'); // shield break sound
+            }
+            break;
+          } else {
+            e.health -= b.damage;
+            playSound('hit');
+            createParticle(b.x, b.y, '#ff0');
+            bullets.splice(i, 1);
+            if(e.health <= 0) {
+              createExplosion(e.x, e.y, e.color);
+              if(e.type === 'splitter' && e.splitCount > 0) {
+                // Spawn two smaller split enemies
+                for(let s = 0; s < 2; s++) {
+                  let splitEnemy = new Enemy(e.x + randRange(-20, 20), e.y + randRange(-20, 20), 10, 4, '#0f0', 1, false, 'normal');
+                  enemies.push(splitEnemy);
+                }
+              }
+              enemies.splice(j, 1);
+              score += e.isBoss ? 100 : 10;
+
+              // Spawn powerup occasionally on enemy death
+              if(Math.random() < 0.25) spawnPowerup(e.x, e.y);
+
+              // Reset boss flag if boss dies
+              if(e.isBoss) bossSpawned = false;
+            }
+            break;
           }
-          break;
         }
+      }
+    }
+
+    // Enemy bullets update and collision with player
+    for(let i = enemyBullets.length - 1; i >= 0; i--) {
+      const b = enemyBullets[i];
+      b.x += b.vx;
+      b.y += b.vy;
+
+      if(b.x < -50 || b.x > W + 50 || b.y < -50 || b.y > H + 50) {
+        enemyBullets.splice(i, 1);
+        continue;
+      }
+
+      const dx = b.x - player.x;
+      const dy = b.y - player.y;
+      if(Math.sqrt(dx*dx + dy*dy) < b.radius + player.radius) {
+        enemyBullets.splice(i, 1);
+        damagePlayer(b.damage);
       }
     }
   }
@@ -510,7 +648,7 @@
       const dy = p.y - player.y;
       if(Math.sqrt(dx*dx + dy*dy) < p.radius + player.radius) {
         // Apply powerup effect
-        if(p.type === 'speedBoost') player.powerups.speedBoost = 600; // 10 seconds at 60fps approx
+        if(p.type === 'speedBoost') player.powerups.speedBoost = 600;
         else if(p.type === 'shield') player.powerups.shield = 600;
         else if(p.type === 'health') {
           player.health = Math.min(player.health + 40, player.maxHealth);
@@ -570,6 +708,15 @@
 
   function drawBullets() {
     bullets.forEach(b => {
+      ctx.fillStyle = b.color;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.radius, 0, Math.PI*2);
+      ctx.fill();
+    });
+  }
+
+  function drawEnemyBullets() {
+    enemyBullets.forEach(b => {
       ctx.fillStyle = b.color;
       ctx.beginPath();
       ctx.arc(b.x, b.y, b.radius, 0, Math.PI*2);
@@ -716,14 +863,27 @@
     // Spawn enemies
     if(performance.now() - lastEnemySpawn > enemySpawnInterval) {
       lastEnemySpawn = performance.now();
-      if(score < 200) spawnEnemy('normal');
-      else if(score < 400) spawnEnemy(Math.random() < 0.6 ? 'fast' : 'normal');
-      else if(score < 700) spawnEnemy(Math.random() < 0.7 ? 'tank' : 'fast');
-      else if(!bossSpawned) {
+      if(score < 100) spawnEnemy('normal');
+      else if(score < 200) spawnEnemy(Math.random() < 0.6 ? 'fast' : 'normal');
+      else if(score < 350) spawnEnemy(Math.random() < 0.6 ? 'tank' : 'fast');
+      else if(score < 500) {
+        const types = ['normal', 'fast', 'tank', 'shooter'];
+        spawnEnemy(types[Math.floor(randRange(0, types.length))]);
+      } else if(score < 700) {
+        const types = ['normal', 'fast', 'tank', 'shooter', 'splitter'];
+        spawnEnemy(types[Math.floor(randRange(0, types.length))]);
+      } else if(score < 900) {
+        const types = ['normal', 'fast', 'tank', 'shooter', 'splitter', 'shielded'];
+        spawnEnemy(types[Math.floor(randRange(0, types.length))]);
+      } else if(score < 1200) {
+        const types = ['normal', 'fast', 'tank', 'shooter', 'splitter', 'shielded', 'flame'];
+        spawnEnemy(types[Math.floor(randRange(0, types.length))]);
+      } else if(!bossSpawned) {
         spawnEnemy('boss');
         bossSpawned = true;
       } else {
-        spawnEnemy(['normal','fast','tank'][Math.floor(randRange(0,3))]);
+        const types = ['normal', 'fast', 'tank', 'shooter', 'splitter', 'shielded', 'flame'];
+        spawnEnemy(types[Math.floor(randRange(0, types.length))]);
       }
     }
 
@@ -762,44 +922,51 @@
     drawPowerups();
     drawEnemies();
     drawBullets();
+    drawEnemyBullets();
     drawParticles();
     drawPlayer();
   }
 
   // --- Reset game ---
   function resetGame() {
+    gameOver = false;
+    paused = false;
     score = 0;
-    player.health = player.maxHealth;
+    elapsedTime = 0;
+    lastEnemySpawn = 0;
+    lastPowerupSpawn = 0;
+    bossSpawned = false;
+    weapons.pistol.ammo = Infinity;
+    weapons.rifle.ammo = weapons.rifle.maxAmmo;
+    weapons.smg.ammo = weapons.smg.maxAmmo;
+    weapons.sniper.ammo = weapons.sniper.maxAmmo;
+    weapons.shotgun.ammo = weapons.shotgun.maxAmmo;
+    currentWeaponKey = 'pistol';
     player.x = W/2;
     player.y = H/2;
-    enemies.length = 0;
+    player.health = player.maxHealth;
+    player.powerups.speedBoost = 0;
+    player.powerups.shield = 0;
     bullets.length = 0;
+    enemies.length = 0;
+    enemyBullets.length = 0;
     particles.length = 0;
     powerups.length = 0;
     isReloading = false;
-    bossSpawned = false;
-    for(let w in weapons) {
-      weapons[w].ammo = weapons[w].maxAmmo;
-    }
     updateAmmoDisplay();
     updateReloadDisplay();
-    updateScore();
-    updateTimer();
     updateHealthBar();
+    updateScore();
     updatePowerupTimers();
-    gameOver = false;
-    paused = false;
     hideMenu();
     startTime = performance.now();
-    lastEnemySpawn = 0;
-    lastPowerupSpawn = 0;
   }
 
   // --- Start game ---
   function startGame() {
     resetGame();
-    hideMenu();
-    startTime = performance.now();
+    lastFrameTime = performance.now();
+    requestAnimationFrame(gameLoop);
   }
 
   // --- Pause toggle ---
@@ -814,21 +981,19 @@
     }
   }
 
-  // --- Initialize ---
+  // Initial menu
   showMenu(true);
   updateAmmoDisplay();
-  updateReloadDisplay();
+  updateHealthBar();
 
-  // Start loop
-  requestAnimationFrame(gameLoop);
-
-  // Adjust canvas size on window resize
+  // Resize handling
   window.addEventListener('resize', () => {
     W = window.innerWidth;
     H = window.innerHeight;
     canvas.width = W;
     canvas.height = H;
   });
+
 })();
 </script>
 </body>
