@@ -1,5 +1,6 @@
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
+const blocks = [];
 
 // Sprite position and size
 let player = {
