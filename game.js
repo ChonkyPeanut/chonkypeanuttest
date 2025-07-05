@@ -58,21 +58,24 @@ function update() {
   if (keys.a) player.x -= player.speed;
   if (keys.d) player.x += player.speed;
 
-  // Assume player is airborne until proven grounded
+  // Assume airborne by default
   player.grounded = false;
 
-  // Gravity only applies if S is held or player is jumping/falling
-  if (keys.s || player.vy !== 0) {
-    player.vy += player.gravity;
-    player.y += player.vy;
+  // Floor collision
+  const floorY = canvas.height - player.height;
+  if (player.y >= floorY) {
+    player.y = floorY;
+    player.vy = 0;
+    player.grounded = true;
   }
 
-  // Block collision detection (vertical)
+  // Block collision (before applying gravity)
   for (let block of blocks) {
     const touchingHorizontally =
       player.x + player.width > block.x && player.x < block.x + block.width;
     const fallingOntoBlock =
-      player.y + player.height <= block.y && player.y + player.height + player.vy >= block.y;
+      player.y + player.height <= block.y &&
+      player.y + player.height + player.vy >= block.y;
 
     if (touchingHorizontally && fallingOntoBlock) {
       player.y = block.y - player.height;
@@ -81,18 +84,16 @@ function update() {
     }
   }
 
-  // Floor collision
-  const floorY = canvas.height - player.height;
-  if (player.y > floorY) {
-    player.y = floorY;
-    player.vy = 0;
-    player.grounded = true;
-  }
-
-  // Jumping only if grounded
+  // Jump (only if grounded)
   if (keys.w && player.grounded) {
     player.vy = player.jumpStrength;
     player.grounded = false;
+  }
+
+  // Gravity applies when falling OR holding S
+  if (!player.grounded || keys.s) {
+    player.vy += player.gravity;
+    player.y += player.vy;
   }
 
   // Wall collision
@@ -101,7 +102,7 @@ function update() {
     player.x = canvas.width - player.width;
   }
 
-  // Update blocks (falling behavior)
+  // Block falling logic
   for (let block of blocks) {
     if (block.isFalling) {
       block.vy += 0.5;
