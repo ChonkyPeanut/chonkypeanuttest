@@ -30,12 +30,13 @@ const jumpBufferLimit = 10; // ~10 frames = 166ms
 document.addEventListener("keydown", (e) => {
   if (keys.hasOwnProperty(e.key)) keys[e.key] = true;
 
-  if (e.key === "1") {
-    // Center-aligned block placement
-    const blockX = Math.floor((player.x + player.width / 2) / 50) * 50;
-    const blockY = Math.floor((player.y + player.height) / 50) * 50;
-    const key = `${blockX},${blockY}`;
+  // Center-aligned block cell
+  const blockX = Math.floor((player.x + player.width / 2) / 50) * 50;
+  const blockY = Math.floor((player.y + player.height) / 50) * 50;
+  const key = `${blockX},${blockY}`;
 
+  // Place block
+  if (e.key === "1") {
     if (!grid.has(key)) {
       blocks.push({
         x: blockX,
@@ -50,6 +51,18 @@ document.addEventListener("keydown", (e) => {
     }
   }
 
+  // Destroy block
+  if (e.key === "2") {
+    if (grid.has(key)) {
+      const index = blocks.findIndex(b => b.x === blockX && b.y === blockY);
+      if (index !== -1) {
+        blocks.splice(index, 1);
+        grid.delete(key);
+      }
+    }
+  }
+
+  // Jump buffering
   if (e.key === "w") {
     jumpBufferTimer = jumpBufferLimit;
   }
@@ -59,13 +72,12 @@ document.addEventListener("keyup", (e) => {
   if (keys.hasOwnProperty(e.key)) keys[e.key] = false;
 });
 
-// Main update
+// Update loop
 function update() {
   // Horizontal movement
   if (keys.a) player.x -= player.speed;
   if (keys.d) player.x += player.speed;
 
-  // Assume airborne
   player.grounded = false;
 
   // Floor collision
@@ -76,7 +88,7 @@ function update() {
     player.grounded = true;
   }
 
-  // Block collision
+  // Collision with blocks (vertical)
   for (let block of blocks) {
     const touchX = player.x + player.width > block.x && player.x < block.x + block.width;
     const fallOn = player.y + player.height <= block.y &&
@@ -89,7 +101,7 @@ function update() {
     }
   }
 
-  // Jump buffering
+  // Jump buffer handling
   if (jumpBufferTimer > 0) jumpBufferTimer--;
   if (jumpBufferTimer > 0 && player.grounded) {
     player.vy = player.jumpStrength;
@@ -97,32 +109,29 @@ function update() {
     jumpBufferTimer = 0;
   }
 
-  // Apply gravity
+  // Gravity (only falls when airborne or holding S)
   if (!player.grounded || keys.s) {
     player.vy += player.gravity;
     player.y += player.vy;
   }
 
-  // Wall boundaries
+  // Wall clamp
   if (player.x < 0) player.x = 0;
   if (player.x + player.width > canvas.width) {
     player.x = canvas.width - player.width;
   }
 
-  // Block updates (falling)
+  // Block falling update
   for (let block of blocks) {
     if (block.isFalling) {
-      const nextY = block.y + block.vy + 0.5;
-
       block.vy += 0.5;
       block.y += block.vy;
 
-      // Hit floor
+      // Floor collision
       if (block.y + block.height >= canvas.height) {
         block.y = canvas.height - block.height;
         block.vy = 0;
         block.isFalling = false;
-
         grid.add(`${block.x},${block.y}`);
       }
 
@@ -138,7 +147,6 @@ function update() {
           block.y = other.y - block.height;
           block.vy = 0;
           block.isFalling = false;
-
           grid.add(`${block.x},${block.y}`);
         }
       }
@@ -146,7 +154,7 @@ function update() {
   }
 }
 
-// Drawing
+// Draw loop
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -159,6 +167,15 @@ function draw() {
   // Draw player
   ctx.fillStyle = player.color;
   ctx.fillRect(player.x, player.y, player.width, player.height);
+
+  // Draw outline (placement preview)
+  const previewX = Math.floor((player.x + player.width / 2) / 50) * 50;
+  const previewY = Math.floor((player.y + player.height) / 50) * 50;
+  const previewKey = `${previewX},${previewY}`;
+
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = grid.has(previewKey) ? "red" : "lime";
+  ctx.strokeRect(previewX, previewY, 50, 50);
 }
 
 // Game loop
