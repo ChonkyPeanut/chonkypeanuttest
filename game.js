@@ -1,17 +1,13 @@
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
-// Constants
 const TILE_SIZE = 50;
 const GRID_WIDTH = 16;
 const GRID_HEIGHT = 16;
-const CANVAS_WIDTH = TILE_SIZE * GRID_WIDTH;
-const CANVAS_HEIGHT = TILE_SIZE * GRID_HEIGHT;
+canvas.width = TILE_SIZE * GRID_WIDTH;
+canvas.height = TILE_SIZE * GRID_HEIGHT;
 
-canvas.width = CANVAS_WIDTH;
-canvas.height = CANVAS_HEIGHT;
-
-// Grid: 2D array to track block occupancy (false = empty, true = occupied)
+// Grid occupancy (false = empty, true = block)
 const grid = [];
 for (let y = 0; y < GRID_HEIGHT; y++) {
   const row = [];
@@ -21,21 +17,19 @@ for (let y = 0; y < GRID_HEIGHT; y++) {
   grid.push(row);
 }
 
-// Store all blocks here
 const blocks = [];
 const particles = [];
 
-// Player setup
 let player = {
   x: 100,
   y: 100,
-  width: 50,
-  height: 50,
+  width: TILE_SIZE,
+  height: TILE_SIZE,
   color: "lime",
-  speed: 200,          // pixels per second
+  speed: 300,           // px/sec
   vy: 0,
-  gravity: 1200,       // pixels per second squared
-  jumpStrength: -450,
+  gravity: 1500,        // px/s²
+  jumpStrength: -600,
   grounded: false,
   health: 100,
   maxHealth: 100
@@ -45,7 +39,6 @@ const keys = { w: false, a: false, s: false, d: false };
 let jumpBufferTimer = 0;
 const jumpBufferLimit = 0.15; // seconds
 
-// Particle class for destruction effect
 class Particle {
   constructor(x, y, color) {
     this.x = x + TILE_SIZE / 2;
@@ -60,7 +53,7 @@ class Particle {
     this.x += this.vx * dt;
     this.y += this.vy * dt;
     this.vy += 800 * dt; // gravity on particles
-    this.alpha -= dt * 2; // fade out
+    this.alpha -= dt * 2;
   }
   draw(ctx) {
     ctx.save();
@@ -76,20 +69,17 @@ class Particle {
   }
 }
 
-// Helper to check if grid cell is occupied
 function isOccupied(gridX, gridY) {
-  if (gridX < 0 || gridX >= GRID_WIDTH || gridY < 0 || gridY >= GRID_HEIGHT) return true; // out of bounds considered occupied
+  if (gridX < 0 || gridX >= GRID_WIDTH || gridY < 0 || gridY >= GRID_HEIGHT) return true;
   return grid[gridY][gridX];
 }
 
-// Helper to set occupancy in grid
 function setOccupied(gridX, gridY, val) {
   if (gridX >= 0 && gridX < GRID_WIDTH && gridY >= 0 && gridY < GRID_HEIGHT) {
     grid[gridY][gridX] = val;
   }
 }
 
-// Converts pixel coords to grid coords
 function toGridCoords(px, py) {
   return {
     x: Math.floor(px / TILE_SIZE),
@@ -97,7 +87,6 @@ function toGridCoords(px, py) {
   };
 }
 
-// Converts grid coords to pixel coords (top-left of tile)
 function toPixelCoords(gridX, gridY) {
   return {
     x: gridX * TILE_SIZE,
@@ -105,7 +94,6 @@ function toPixelCoords(gridX, gridY) {
   };
 }
 
-// Input handlers
 document.addEventListener("keydown", (e) => {
   if (keys.hasOwnProperty(e.key)) {
     keys[e.key] = true;
@@ -133,36 +121,52 @@ document.addEventListener("keyup", (e) => {
   }
 });
 
-// Place block at player's current grid position (centered on player)
 function placeBlock() {
+  // Place block below player's feet (centered horizontally)
   const centerX = player.x + player.width / 2;
-  const centerY = player.y + player.height; // place below player's feet
+  const blockGridPos = toGridCoords(centerX, player.y + player.height);
 
-  let gridPos = toGridCoords(centerX, centerY);
-
-  // If block below is occupied, push placement up one tile at a time until empty or top reached
-  while (isOccupied(gridPos.x, gridPos.y)) {
-    gridPos.y--;
-    if (gridPos.y < 0) return; // no space to place
+  // Can't place if tile occupied
+  if (isOccupied(blockGridPos.x, blockGridPos.y)) {
+    return; // block exists here, do nothing
   }
 
-  // Place block at gridPos if empty
-  if (!isOccupied(gridPos.x, gridPos.y)) {
-    const pixelPos = toPixelCoords(gridPos.x, gridPos.y);
-    blocks.push({
-      x: pixelPos.x,
-      y: pixelPos.y,
-      width: TILE_SIZE,
-      height: TILE_SIZE,
-      color: "white",
-      vy: 0,
-      isFalling: false  // static immediately because grid is updated
-    });
-    setOccupied(gridPos.x, gridPos.y, true);
+  // Create block object with falling enabled initially
+  let fallGridY = blockGridPos.y;
+
+  // Check if block below this pos is occupied or floor
+  if (fallGridY === GRID_HEIGHT - 1 || isOccupied(blockGridPos.x, fallGridY + 1)) {
+    // Block stands immediately, no fall
+  } else {
+    // Block will fall - find lowest free position until block below or floor
+    while (
+      fallGridY < GRID_HEIGHT - 1 &&
+      !isOccupied(blockGridPos.x, fallGridY + 1)
+    ) {
+      fallGridY++;
+    }
   }
+
+  // Set block at fallGridY pos
+  const pixelPos = toPixelCoords(blockGridPos.x, fallGridY);
+  blocks.push({
+    x: pixelPos.x,
+    y: pixelPos.y,
+    width: TILE_SIZE,
+    height: TILE_SIZE,
+    color: "white",
+    vy: 0,
+    isFalling: false // we place block directly where it lands, no falling animation
+  });
+  setOccupied(blockGridPos.x, fallGridY, true);
+
+  // Boost player up by one block height (50 px)
+  player.y -= TILE_SIZE;
+
+  // Clamp player so he does not go above canvas
+  if (player.y < 0) player.y = 0;
 }
 
-// Destroy block at player's current grid position
 function destroyBlock() {
   const centerX = player.x + player.width / 2;
   const centerY = player.y + player.height / 2;
@@ -172,7 +176,6 @@ function destroyBlock() {
   if (isOccupied(gridPos.x, gridPos.y)) {
     const pixelPos = toPixelCoords(gridPos.x, gridPos.y);
 
-    // Find block index and remove
     const idx = blocks.findIndex(b => b.x === pixelPos.x && b.y === pixelPos.y);
     if (idx !== -1) {
       // Spawn particles
@@ -193,18 +196,20 @@ function update(timestamp = 0) {
   const dt = (timestamp - lastTimestamp) / 1000;
   lastTimestamp = timestamp;
 
-  // Movement - smooth & FPS independent
-  if (keys.a) player.x -= player.speed * dt;
-  if (keys.d) player.x += player.speed * dt;
+  // Horizontal movement - no diagonal slowdowns
+  let moveX = 0;
+  if (keys.a) moveX -= 1;
+  if (keys.d) moveX += 1;
 
-  player.grounded = false;
+  player.x += moveX * player.speed * dt;
 
   // Clamp horizontal position
   if (player.x < 0) player.x = 0;
-  if (player.x + player.width > CANVAS_WIDTH) player.x = CANVAS_WIDTH - player.width;
+  if (player.x + player.width > canvas.width) player.x = canvas.width - player.width;
 
-  // Vertical collisions with blocks
-  // We'll check if player is standing on a block
+  player.grounded = false;
+
+  // Vertical collision check - player standing on blocks
   for (const block of blocks) {
     const collidesX = player.x + player.width > block.x && player.x < block.x + block.width;
     const playerFeet = player.y + player.height;
@@ -215,19 +220,19 @@ function update(timestamp = 0) {
       player.y = blockTop - player.height;
       player.vy = 0;
       player.grounded = true;
-      break;  // grounded on at least one block
+      break;
     }
   }
 
   // Floor collision
-  const floorY = CANVAS_HEIGHT - player.height;
+  const floorY = canvas.height - player.height;
   if (player.y >= floorY) {
     player.y = floorY;
     player.vy = 0;
     player.grounded = true;
   }
 
-  // Jump buffering
+  // Jump buffer timer
   if (jumpBufferTimer > 0) jumpBufferTimer -= dt;
   if (jumpBufferTimer > 0 && player.grounded) {
     player.vy = player.jumpStrength;
@@ -235,26 +240,24 @@ function update(timestamp = 0) {
     jumpBufferTimer = 0;
   }
 
-  // Gravity applies if not grounded or holding S
-  if (!player.grounded || keys.s) {
+  // Gravity only if not grounded
+  if (!player.grounded) {
     player.vy += player.gravity * dt;
     player.y += player.vy * dt;
   }
 
-  // Update blocks (no falling blocks anymore, static blocks only)
-  // (Removed falling physics because blocks are static on placement)
+  // **NO DOWN MOVEMENT** (disable S key effect)
+  // Player can climb blocks by jumping or walking up but no manual down
 
   // Update particles
   for (let i = particles.length - 1; i >= 0; i--) {
     particles[i].update(dt);
-    if (!particles[i].isAlive()) {
-      particles.splice(i, 1);
-    }
+    if (!particles[i].isAlive()) particles.splice(i, 1);
   }
 }
 
 function draw() {
-  ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   // Draw blocks
   for (const block of blocks) {
@@ -266,7 +269,7 @@ function draw() {
   ctx.fillStyle = player.color;
   ctx.fillRect(player.x, player.y, player.width, player.height);
 
-  // Draw health bar above player (polished)
+  // Draw health bar (polished)
   const barWidth = TILE_SIZE;
   const barHeight = 8;
   const healthPercent = player.health / player.maxHealth;
@@ -283,7 +286,7 @@ function draw() {
   ctx.lineWidth = 2;
   roundRect(ctx, barX, barY, barWidth, barHeight, 3, false, true);
 
-  // Draw placement outline around player's current grid cell
+  // Draw placement outline around player's grid cell
   const centerX = player.x + player.width / 2;
   const centerY = player.y + player.height / 2;
   const gridPos = toGridCoords(centerX, centerY);
@@ -297,9 +300,7 @@ function draw() {
   ctx.shadowBlur = 0;
 
   // Draw particles
-  for (const p of particles) {
-    p.draw(ctx);
-  }
+  for (const p of particles) p.draw(ctx);
 
   // Draw player coordinates top-right outside canvas
   const coordsText = `X: ${Math.floor(player.x)}, Y: ${Math.floor(player.y)}`;
@@ -307,13 +308,12 @@ function draw() {
   ctx.fillStyle = "white";
   ctx.strokeStyle = "black";
   ctx.lineWidth = 3;
-  const textX = CANVAS_WIDTH - ctx.measureText(coordsText).width - 10;
+  const textX = canvas.width - ctx.measureText(coordsText).width - 10;
   const textY = 20;
   ctx.strokeText(coordsText, textX, textY);
   ctx.fillText(coordsText, textX, textY);
 }
 
-// Helper for rounded rectangles
 function roundRect(ctx, x, y, width, height, radius, fill, stroke) {
   if (typeof stroke === "undefined") stroke = true;
   if (typeof radius === "undefined") radius = 5;
@@ -340,7 +340,7 @@ function roundRect(ctx, x, y, width, height, radius, fill, stroke) {
   if (stroke) ctx.stroke();
 }
 
-function loop(timestamp) {
+function loop(timestamp = 0) {
   update(timestamp);
   draw();
   requestAnimationFrame(loop);
