@@ -839,16 +839,17 @@
 
   // --- Update ---
   function update(delta) {
-    if(isReloading) {
-      if(performance.now() - reloadStartTime >= reloadTime) {
-        const w = weapons[currentWeaponKey];
-        w.ammo = w.maxAmmo;
-        isReloading = false;
-        updateReloadDisplay();
-        updateAmmoDisplay();
-      }
-      return; // no shooting or moving while reloading
-    }
+    if (isReloading) {
+  if (performance.now() - reloadStartTime >= reloadTime) {
+    const w = weapons[currentWeaponKey];
+    w.ammo = w.maxAmmo;
+    isReloading = false;
+    updateReloadDisplay();
+    updateAmmoDisplay();
+  }
+  // Allow movement and other updates during reload — no return here
+}
+
 
     updatePlayer(delta);
     updateBullets();
