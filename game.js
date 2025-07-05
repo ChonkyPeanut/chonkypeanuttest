@@ -1,215 +1,170 @@
-// === game.js: Final 2D Minecraft-Inspired Version ===
-
+// 2D Minecraft-like Game Fix: Correct Y-Axis Direction
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
+
 canvas.width = 800;
-canvas.height = 900;
+canvas.height = 800;
 
-// === Constants ===
 const TILE_SIZE = 50;
-const GRID_WIDTH = 16;
-const GRID_HEIGHT = 16;
-const WORLD = [];
-const DAMAGE_THRESHOLD = {
-  "stone": 10,
-  "dirt": 5
-};
+const GRID_WIDTH = canvas.width / TILE_SIZE;
+const GRID_HEIGHT = canvas.height / TILE_SIZE;
 
-// === Tools/Items ===
-const HOTBAR = ["block", "shovel", null, null, null, null, null, null];
-let selectedItem = 1; // Shovel
+const blocks = [];
+const grid = new Map();
+const particles = [];
 
-// === Player ===
-const player = {
+// Utility
+function getGridKey(x, y) {
+  return `${x},${y}`;
+}
+
+function worldToScreen(y) {
+  // Flip Y axis
+  return canvas.height - (y + TILE_SIZE);
+}
+
+// Player setup
+let player = {
   x: 400,
   y: 600,
-  width: 50,
-  height: 50,
+  width: TILE_SIZE,
+  height: TILE_SIZE,
   color: "lime",
-  vx: 0,
-  vy: 0,
-  gravity: 0.6,
   speed: 4,
-  jumpStrength: -12,
+  vy: 0,
+  gravity: 0.5,
+  jumpStrength: 10,
   grounded: false,
   health: 100,
   maxHealth: 100
 };
 
-// === Mouse + Keys ===
-let mouseX = 0;
-let mouseY = 0;
-const keys = {};
+const keys = { w: false, a: false, s: false, d: false };
+let jumpBufferTimer = 0;
+const jumpBufferLimit = 10;
 
-// === Map Generation ===
+// Input
+document.addEventListener("keydown", (e) => {
+  if (keys.hasOwnProperty(e.key)) keys[e.key] = true;
+  if (e.key === "w") jumpBufferTimer = jumpBufferLimit;
+});
+document.addEventListener("keyup", (e) => {
+  if (keys.hasOwnProperty(e.key)) keys[e.key] = false;
+});
+
+// Initial Terrain Generation
 for (let y = 0; y < GRID_HEIGHT; y++) {
-  WORLD[y] = [];
   for (let x = 0; x < GRID_WIDTH; x++) {
-    if (y >= 6) {
-      // y=300 to 500: dirt with ore chance
-      const oreChance = Math.random();
-      let ore = null;
-      if (oreChance < 0.05) ore = "gold";
-      else if (oreChance < 0.10) ore = "silver";
-      else if (oreChance < 0.15) ore = "coal";
-      WORLD[y][x] = { type: "dirt", hp: DAMAGE_THRESHOLD.dirt, ore };
-    } else if (y >= 0 && y < 6) {
-      // Below y=300: stone
-      WORLD[y][x] = { type: "stone", hp: DAMAGE_THRESHOLD.stone };
-    } else {
-      WORLD[y][x] = null;
+    if (y < 6) continue;
+    const key = getGridKey(x, y);
+    if (Math.random() < 0.3) {
+      const blockColor = y >= 10
+        ? "lightgray"
+        : (y >= 6
+          ? `rgb(${120 + Math.random()*40}, ${72 + Math.random()*20}, ${10})`
+          : "lightgray");
+      blocks.push({
+        x: x * TILE_SIZE,
+        y: y * TILE_SIZE,
+        width: TILE_SIZE,
+        height: TILE_SIZE,
+        color: blockColor,
+        vy: 0,
+        isFalling: false
+      });
+      grid.set(key, true);
     }
   }
 }
 
-// === Event Listeners ===
-document.addEventListener("keydown", e => keys[e.key] = true);
-document.addEventListener("keyup", e => keys[e.key] = false);
-canvas.addEventListener("mousemove", e => {
-  const rect = canvas.getBoundingClientRect();
-  mouseX = e.clientX - rect.left;
-  mouseY = e.clientY - rect.top;
-});
-canvas.addEventListener("mousedown", e => {
-  const gridX = Math.floor(mouseX / TILE_SIZE);
-  const gridY = GRID_HEIGHT - 1 - Math.floor((mouseY - 100) / TILE_SIZE);
-
-  if (gridX >= 0 && gridX < GRID_WIDTH && gridY >= 0 && gridY < GRID_HEIGHT) {
-    const dx = gridX - Math.floor((player.x + player.width / 2) / TILE_SIZE);
-    const dy = gridY - Math.floor((player.y + player.height / 2) / TILE_SIZE);
-    const isInReach = Math.abs(dx) <= 1 && Math.abs(dy) <= 1;
-
-    const block = WORLD[gridY][gridX];
-
-    if (selectedItem === 1 && isInReach && block) {
-      // Mine with shovel
-      block.hp--;
-      if (block.hp <= 0) {
-        WORLD[gridY][gridX] = null;
-        fallBlocks(gridX, gridY);
-      }
-    }
-    if (selectedItem === 0 && isInReach && !block) {
-      // Place block (falls if floating)
-      let placeY = gridY;
-      while (placeY > 0 && !WORLD[placeY - 1][gridX]) placeY--;
-      if (placeY < GRID_HEIGHT) {
-        WORLD[placeY][gridX] = { type: "dirt", hp: DAMAGE_THRESHOLD.dirt };
-      }
-    }
-  }
-});
-
-function fallBlocks(x, y) {
-  for (let i = y + 1; i < GRID_HEIGHT; i++) {
-    if (WORLD[i][x]) {
-      WORLD[i - 1][x] = WORLD[i][x];
-      WORLD[i][x] = null;
-    } else break;
-  }
-}
-
-// === Update ===
+// Update
 function update() {
-  // Movement
-  if (keys["a"]) player.x -= player.speed;
-  if (keys["d"]) player.x += player.speed;
+  if (keys.a) player.x -= player.speed;
+  if (keys.d) player.x += player.speed;
 
-  // Apply gravity
-  player.vy += player.gravity;
-  player.y += player.vy;
   player.grounded = false;
 
-  // Ground collision
-  const footY = Math.floor(player.y / TILE_SIZE);
-  const midX = Math.floor((player.x + player.width / 2) / TILE_SIZE);
-  if (footY >= 0 && footY < GRID_HEIGHT && midX >= 0 && midX < GRID_WIDTH) {
-    if (WORLD[footY][midX]) {
-      player.y = footY * TILE_SIZE;
+  // Gravity (pulling down in canvas = negative vy)
+  player.vy -= player.gravity;
+  player.y += player.vy;
+
+  // Collision detection
+  const px = Math.floor(player.x / TILE_SIZE);
+  const py = Math.floor(player.y / TILE_SIZE);
+
+  for (let block of blocks) {
+    const bx = block.x;
+    const by = block.y;
+    if (
+      player.x + player.width > bx && player.x < bx + TILE_SIZE &&
+      player.y <= by + TILE_SIZE && player.y >= by - TILE_SIZE &&
+      player.y > by
+    ) {
+      player.y = block.y + TILE_SIZE;
       player.vy = 0;
       player.grounded = true;
     }
   }
 
-  // Jump
-  if (keys["w"] && player.grounded) {
-    player.vy = player.jumpStrength;
-    player.grounded = false;
+  // World floor
+  if (player.y < 0) {
+    player.y = 0;
+    player.vy = 0;
+    player.grounded = true;
   }
 
-  // Clamp to canvas
-  player.x = Math.max(0, Math.min(player.x, canvas.width - player.width));
-  player.y = Math.min(canvas.height - player.height, player.y);
+  // Jump
+  if (jumpBufferTimer > 0) jumpBufferTimer--;
+  if (jumpBufferTimer > 0 && player.grounded) {
+    player.vy = player.jumpStrength;
+    jumpBufferTimer = 0;
+  }
+
+  // Wall bounds
+  if (player.x < 0) player.x = 0;
+  if (player.x + player.width > canvas.width) player.x = canvas.width - player.width;
 }
 
-// === Draw ===
+// Draw
 function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
   // Background
   for (let y = 0; y < GRID_HEIGHT; y++) {
     for (let x = 0; x < GRID_WIDTH; x++) {
-      const block = WORLD[y][x];
-      if (block) {
-        let color = block.type === "stone" ? "lightgray" : "#b97b56";
-        if (block.ore === "gold") color = "#FFD700";
-        if (block.ore === "silver") color = "#C0C0C0";
-        if (block.ore === "coal") color = "#333";
-        ctx.fillStyle = color;
-        ctx.fillRect(x * TILE_SIZE, canvas.height - 100 - (y + 1) * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-      }
+      const screenY = worldToScreen(y * TILE_SIZE);
+      ctx.fillStyle = y < 6 ? "#87CEEB" : `rgb(${40 - y}, ${25 - y / 2}, ${10})`;
+      ctx.fillRect(x * TILE_SIZE, screenY, TILE_SIZE, TILE_SIZE);
     }
   }
 
-  // Background color above/below y=500
-  ctx.fillStyle = "#87ceeb"; // sky
-  ctx.fillRect(0, 0, canvas.width, canvas.height - 900);
+  // Blocks
+  for (let block of blocks) {
+    const screenY = worldToScreen(block.y);
+    ctx.fillStyle = block.color;
+    ctx.fillRect(block.x, screenY, TILE_SIZE, TILE_SIZE);
+  }
 
   // Player
+  const playerScreenY = worldToScreen(player.y);
   ctx.fillStyle = player.color;
-  ctx.fillRect(player.x, canvas.height - 100 - player.y - player.height, player.width, player.height);
+  ctx.fillRect(player.x, playerScreenY, player.width, player.height);
 
-  // Shovel
-  ctx.strokeStyle = "brown";
-  ctx.beginPath();
-  ctx.moveTo(player.x + 25, canvas.height - 100 - player.y - 25);
-  ctx.lineTo(mouseX, mouseY);
-  ctx.stroke();
-
-  // Health bar
-  const healthBarX = canvas.width - 210;
+  // Health Bar (Top Right)
+  const barWidth = 100;
+  const barHeight = 10;
+  const healthRatio = player.health / player.maxHealth;
   ctx.fillStyle = "black";
-  ctx.fillRect(healthBarX, 10, 200, 20);
+  ctx.fillRect(canvas.width - barWidth - 10, 10, barWidth, barHeight);
   ctx.fillStyle = "red";
-  ctx.fillRect(healthBarX, 10, 200 * (player.health / player.maxHealth), 20);
+  ctx.fillRect(canvas.width - barWidth - 10, 10, barWidth * healthRatio, barHeight);
 
-  // Coordinates
-  ctx.fillStyle = "black";
-  ctx.font = "16px monospace";
-  ctx.fillText(`X: ${Math.floor(player.x / TILE_SIZE)} Y: ${Math.floor(player.y / TILE_SIZE)}`, canvas.width - 200, 45);
-
-  // Hotbar
-  for (let i = 0; i < 8; i++) {
-    const x = i * 100;
-    ctx.strokeStyle = i === selectedItem ? "yellow" : "black";
-    ctx.strokeRect(x, canvas.height - 90, 100, 90);
-    if (HOTBAR[i] === "shovel") {
-      ctx.fillStyle = "brown";
-      ctx.fillText("🪓", x + 40, canvas.height - 50);
-    } else if (HOTBAR[i] === "block") {
-      ctx.fillStyle = "gray";
-      ctx.fillRect(x + 25, canvas.height - 65, 50, 50);
-    }
-  }
-
-  // Outline
-  const hoverX = Math.floor(mouseX / TILE_SIZE);
-  const hoverY = Math.floor((canvas.height - mouseY - 100) / TILE_SIZE);
-  const dx = hoverX - Math.floor((player.x + player.width / 2) / TILE_SIZE);
-  const dy = hoverY - Math.floor(player.y / TILE_SIZE);
-  const reachable = Math.abs(dx) <= 1 && Math.abs(dy) <= 1;
-
-  ctx.strokeStyle = reachable ? (WORLD[hoverY]?.[hoverX] ? "#faa" : "lime") : "red";
-  ctx.lineWidth = 2;
-  ctx.strokeRect(hoverX * TILE_SIZE, canvas.height - 100 - (hoverY + 1) * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+  // Coordinates (Top Right)
+  ctx.fillStyle = "white";
+  ctx.font = "14px Arial";
+  const cx = Math.floor(player.x / TILE_SIZE);
+  const cy = Math.floor(player.y / TILE_SIZE);
+  ctx.fillText(`X: ${cx}, Y: ${cy}`, canvas.width - 120, 30);
 }
 
 function loop() {
