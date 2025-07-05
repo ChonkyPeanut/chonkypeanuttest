@@ -1,21 +1,52 @@
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
 
-let x = 100;
-let y = 100;
+// Sprite position and size
+let player = {
+  x: 100,
+  y: 100,
+  width: 50,
+  height: 50,
+  speed: 4,
+  color: "lime"
+};
 
-function draw() {
-  ctx.fillStyle = 'black';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+// WASD key state
+const keys = {
+  w: false,
+  a: false,
+  s: false,
+  d: false
+};
 
-  ctx.fillStyle = 'red';
-  ctx.fillRect(x, y, 50, 50);
-}
+// Keydown & keyup listeners
+document.addEventListener("keydown", (e) => {
+  if (keys.hasOwnProperty(e.key)) keys[e.key] = true;
+});
+document.addEventListener("keyup", (e) => {
+  if (keys.hasOwnProperty(e.key)) keys[e.key] = false;
+});
 
+// Update player position
 function update() {
-  x += 1;
-  draw();
-  requestAnimationFrame(update);
+  if (keys.w) player.y -= player.speed;
+  if (keys.s) player.y += player.speed;
+  if (keys.a) player.x -= player.speed;
+  if (keys.d) player.x += player.speed;
 }
 
-update();
+// Draw player
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = player.color;
+  ctx.fillRect(player.x, player.y, player.width, player.height);
+}
+
+// Game loop
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+loop();
