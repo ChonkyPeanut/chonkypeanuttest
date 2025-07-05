@@ -2,6 +2,7 @@ const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 const blocks = [];
 const grid = new Set(); // stores placed block positions
+const particles = [];
 
 let player = {
   x: 100,
@@ -13,7 +14,9 @@ let player = {
   vy: 0,
   gravity: 0.5,
   jumpStrength: -10,
-  grounded: false
+  grounded: false,
+  health: 100,          // max health 100
+  maxHealth: 100
 };
 
 const keys = {
@@ -26,13 +29,44 @@ const keys = {
 let jumpBufferTimer = 0;
 const jumpBufferLimit = 10; // ~10 frames = 166ms
 
+// Particle class for destruction effect
+class Particle {
+  constructor(x, y, color) {
+    this.x = x + 25; // center of block
+    this.y = y + 25;
+    this.vx = (Math.random() - 0.5) * 4;
+    this.vy = (Math.random() - 1.5) * 4;
+    this.alpha = 1;
+    this.color = color;
+    this.size = 5 + Math.random() * 3;
+  }
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.vy += 0.15; // gravity on particles
+    this.alpha -= 0.03;
+  }
+  draw(ctx) {
+    ctx.save();
+    ctx.globalAlpha = this.alpha;
+    ctx.fillStyle = this.color;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+  isAlive() {
+    return this.alpha > 0;
+  }
+}
+
 // Input listeners
 document.addEventListener("keydown", (e) => {
   if (keys.hasOwnProperty(e.key)) keys[e.key] = true;
 
-  // Center-aligned block cell
+  // Calculate quadrant based on player center
   const blockX = Math.floor((player.x + player.width / 2) / 50) * 50;
-  const blockY = Math.floor((player.y + player.height) / 50) * 50;
+  const blockY = Math.floor((player.y + player.height / 2) / 50) * 50;
   const key = `${blockX},${blockY}`;
 
   // Place block
@@ -51,11 +85,15 @@ document.addEventListener("keydown", (e) => {
     }
   }
 
-  // Destroy block
+  // Destroy block + spawn particles
   if (e.key === "2") {
     if (grid.has(key)) {
       const index = blocks.findIndex(b => b.x === blockX && b.y === blockY);
       if (index !== -1) {
+        // Create particles
+        for (let i = 0; i < 15; i++) {
+          particles.push(new Particle(blockX, blockY, "gray"));
+        }
         blocks.splice(index, 1);
         grid.delete(key);
       }
@@ -152,6 +190,14 @@ function update() {
       }
     }
   }
+
+  // Update particles
+  for (let i = particles.length - 1; i >= 0; i--) {
+    particles[i].update();
+    if (!particles[i].isAlive()) {
+      particles.splice(i, 1);
+    }
+  }
 }
 
 // Draw loop
@@ -168,14 +214,33 @@ function draw() {
   ctx.fillStyle = player.color;
   ctx.fillRect(player.x, player.y, player.width, player.height);
 
-  // Draw outline (placement preview)
-  const previewX = Math.floor((player.x + player.width / 2) / 50) * 50;
-  const previewY = Math.floor((player.y + player.height) / 50) * 50;
-  const previewKey = `${previewX},${previewY}`;
+  // Draw health bar above player
+  const barWidth = 50;
+  const barHeight = 6;
+  const healthPercent = player.health / player.maxHealth;
+  const barX = player.x;
+  const barY = player.y - 10;
+
+  ctx.fillStyle = "black";
+  ctx.fillRect(barX - 1, barY - 1, barWidth + 2, barHeight + 2); // border
+  ctx.fillStyle = "red";
+  ctx.fillRect(barX, barY, barWidth * healthPercent, barHeight);
+
+  // Draw outline in player's current quadrant
+  const centerX = player.x + player.width / 2;
+  const centerY = player.y + player.height / 2;
+  const outlineX = Math.floor(centerX / 50) * 50;
+  const outlineY = Math.floor(centerY / 50) * 50;
+  const outlineKey = `${outlineX},${outlineY}`;
 
   ctx.lineWidth = 2;
-  ctx.strokeStyle = grid.has(previewKey) ? "red" : "lime";
-  ctx.strokeRect(previewX, previewY, 50, 50);
+  ctx.strokeStyle = grid.has(outlineKey) ? "red" : "lime";
+  ctx.strokeRect(outlineX, outlineY, 50, 50);
+
+  // Draw particles
+  for (let p of particles) {
+    p.draw(ctx);
+  }
 }
 
 // Game loop
