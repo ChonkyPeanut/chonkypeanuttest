@@ -1,8 +1,8 @@
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 const blocks = [];
+const grid = new Set(); // stores placed block positions
 
-// Player object
 let player = {
   x: 100,
   y: 100,
@@ -16,7 +16,6 @@ let player = {
   grounded: false
 };
 
-// Key tracking
 const keys = {
   w: false,
   a: false,
@@ -24,17 +23,20 @@ const keys = {
   d: false
 };
 
+let jumpBufferTimer = 0;
+const jumpBufferLimit = 10; // ~10 frames = 166ms
+
 // Input listeners
 document.addEventListener("keydown", (e) => {
   if (keys.hasOwnProperty(e.key)) keys[e.key] = true;
 
-  // Place block with key "1"
   if (e.key === "1") {
-    let blockX = Math.floor(player.x / 50) * 50;
-    let blockY = Math.floor((player.y + player.height - 1) / 50) * 50;
+    // Center-aligned block placement
+    const blockX = Math.floor((player.x + player.width / 2) / 50) * 50;
+    const blockY = Math.floor((player.y + player.height) / 50) * 50;
+    const key = `${blockX},${blockY}`;
 
-    const exists = blocks.some(b => b.x === blockX && b.y === blockY);
-    if (!exists) {
+    if (!grid.has(key)) {
       blocks.push({
         x: blockX,
         y: blockY,
@@ -44,7 +46,12 @@ document.addEventListener("keydown", (e) => {
         vy: 0,
         isFalling: true
       });
+      grid.add(key);
     }
+  }
+
+  if (e.key === "w") {
+    jumpBufferTimer = jumpBufferLimit;
   }
 });
 
@@ -52,13 +59,13 @@ document.addEventListener("keyup", (e) => {
   if (keys.hasOwnProperty(e.key)) keys[e.key] = false;
 });
 
-// Update function
+// Main update
 function update() {
   // Horizontal movement
   if (keys.a) player.x -= player.speed;
   if (keys.d) player.x += player.speed;
 
-  // Assume airborne by default
+  // Assume airborne
   player.grounded = false;
 
   // Floor collision
@@ -69,64 +76,70 @@ function update() {
     player.grounded = true;
   }
 
-  // Block collision (before applying gravity)
+  // Block collision
   for (let block of blocks) {
-    const touchingHorizontally =
-      player.x + player.width > block.x && player.x < block.x + block.width;
-    const fallingOntoBlock =
-      player.y + player.height <= block.y &&
-      player.y + player.height + player.vy >= block.y;
+    const touchX = player.x + player.width > block.x && player.x < block.x + block.width;
+    const fallOn = player.y + player.height <= block.y &&
+                   player.y + player.height + player.vy >= block.y;
 
-    if (touchingHorizontally && fallingOntoBlock) {
+    if (touchX && fallOn) {
       player.y = block.y - player.height;
       player.vy = 0;
       player.grounded = true;
     }
   }
 
-  // Jump (only if grounded)
-  if (keys.w && player.grounded) {
+  // Jump buffering
+  if (jumpBufferTimer > 0) jumpBufferTimer--;
+  if (jumpBufferTimer > 0 && player.grounded) {
     player.vy = player.jumpStrength;
     player.grounded = false;
+    jumpBufferTimer = 0;
   }
 
-  // Gravity applies when falling OR holding S
+  // Apply gravity
   if (!player.grounded || keys.s) {
     player.vy += player.gravity;
     player.y += player.vy;
   }
 
-  // Wall collision
+  // Wall boundaries
   if (player.x < 0) player.x = 0;
   if (player.x + player.width > canvas.width) {
     player.x = canvas.width - player.width;
   }
 
-  // Block falling logic
+  // Block updates (falling)
   for (let block of blocks) {
     if (block.isFalling) {
+      const nextY = block.y + block.vy + 0.5;
+
       block.vy += 0.5;
       block.y += block.vy;
 
       // Hit floor
-      if (block.y + block.height > canvas.height) {
+      if (block.y + block.height >= canvas.height) {
         block.y = canvas.height - block.height;
         block.vy = 0;
         block.isFalling = false;
+
+        grid.add(`${block.x},${block.y}`);
       }
 
-      // Stack on other blocks
+      // Land on another block
       for (let other of blocks) {
         if (block === other) continue;
 
-        const touchHoriz = block.x + block.width > other.x && block.x < other.x + other.width;
+        const touchX = block.x + block.width > other.x && block.x < other.x + other.width;
         const fallOn = block.y + block.height <= other.y &&
                        block.y + block.height + block.vy >= other.y;
 
-        if (touchHoriz && fallOn) {
+        if (touchX && fallOn) {
           block.y = other.y - block.height;
           block.vy = 0;
           block.isFalling = false;
+
+          grid.add(`${block.x},${block.y}`);
         }
       }
     }
