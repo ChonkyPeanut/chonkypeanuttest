@@ -3,94 +3,206 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>2D Minecraft-style Game</title>
+<title>2D Minecraft Inspired Game</title>
 <style>
   body {
-    margin: 0; 
-    overflow: hidden; 
-    background: #000;
+    margin: 0; overflow: hidden; background: #000;
+    user-select: none;
   }
   canvas {
     display: block;
     margin: 0 auto;
     background: #222;
-    border: 2px solid #555;
+    border: 3px solid #555;
+  }
+  #coords {
+    position: fixed;
+    top: 5px; right: 10px;
+    color: white; font-family: monospace; font-weight: bold;
+    user-select: none;
+    background: rgba(0,0,0,0.5);
+    padding: 4px 8px;
+    border-radius: 6px;
+    z-index: 100;
   }
 </style>
 </head>
 <body>
 <canvas id="gameCanvas" width="800" height="800"></canvas>
+<div id="coords"></div>
 
 <script>
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
+const coordsDiv = document.getElementById("coords");
 
 const GRID_SIZE = 50;
-const GRID_WIDTH = canvas.width / GRID_SIZE; // 16
-const GRID_HEIGHT = canvas.height / GRID_SIZE; // 16
+const GRID_COLS = 16;
+const GRID_ROWS = 16;
 
-// Generate a 2D grid for blocks (null = empty)
+const BLOCK_DURABILITY = { dirt: 5, stone: 10 };
+
+// Game Grid: 2D array holding blocks or null
+// y=0 bottom, y=15 top (inverted Y axis)
 let grid = [];
-for(let y = 0; y < GRID_HEIGHT; y++) {
+for(let y=0; y<GRID_ROWS; y++) {
   grid[y] = [];
-  for(let x = 0; x < GRID_WIDTH; x++) {
+  for(let x=0; x<GRID_COLS; x++) {
     grid[y][x] = null;
   }
 }
 
-// Fill lower half with dirt blocks
-for(let y = 0; y < GRID_HEIGHT; y++) {
-  for(let x = 0; x < GRID_WIDTH; x++) {
-    if (y > 7) { // bottom half of grid (y=8 to 15)
-      grid[y][x] = { type: 'dirt', color: '#A0522D', solid: true };
+// Fill grid with initial blocks:
+// y=0..7 (bottom half) light grey stone blocks
+// y=8..15 (top half) light brown dirt blocks with some pixels
+function randChoice(arr){return arr[Math.floor(Math.random()*arr.length)];}
+for(let y=0; y<GRID_ROWS; y++){
+  for(let x=0; x<GRID_COLS; x++){
+    if(y <=7){
+      // Light grey stone block with pixel chance
+      let block = {
+        type: 'stone',
+        durability: BLOCK_DURABILITY.stone,
+        color: '#cccccc',
+        pixels: null,
+        solid: true,
+      };
+      if(y <=5){ // y=0..5 add black/gold/silver pixel chance
+        const pixelColors = ['#000000','#c0c0c0','#ffd700'];
+        if(Math.random() < 0.15){
+          block.pixels = [];
+          for(let i=0; i<3; i++){
+            block.pixels.push({
+              x: Math.floor(Math.random()*40)+5,
+              y: Math.floor(Math.random()*40)+5,
+              color: randChoice(pixelColors)
+            });
+          }
+        }
+      }
+      grid[y][x] = block;
+    } else {
+      // Dirt block
+      grid[y][x] = {
+        type: 'dirt',
+        durability: BLOCK_DURABILITY.dirt,
+        color: '#A0522D',
+        pixels: null,
+        solid: true
+      };
     }
   }
 }
 
 // Player object
 let player = {
-  x: 8 * GRID_SIZE,    // column 8, centered horizontally
-  y: 0,                // start at top
+  x: 8 * GRID_SIZE + 5,    // pixel position (5 px offset for nicer)
+  y: 12 * GRID_SIZE,       // start near top (y=12)
   width: 40,
   height: 48,
   vy: 0,
-  speed: 4,
-  gravity: 0.7,
-  jumpStrength: -14,
+  speed: 5,
+  gravity: 1,
+  jumpStrength: -17,
   grounded: false,
-  color: 'lime'
+  health: 100,
+  maxHealth: 100,
+  miningBlock: null,
+  miningHits: 0
 };
 
+// Input state
 const keys = {};
-document.addEventListener("keydown", e => keys[e.key.toLowerCase()] = true);
-document.addEventListener("keyup", e => keys[e.key.toLowerCase()] = false);
+let mouse = { x: 0, y: 0 };
+canvas.addEventListener('mousemove', e => {
+  const rect = canvas.getBoundingClientRect();
+  mouse.x = e.clientX - rect.left;
+  mouse.y = e.clientY - rect.top;
+});
+document.addEventListener('keydown', e => {
+  keys[e.key.toLowerCase()] = true;
+});
+document.addEventListener('keyup', e => {
+  keys[e.key.toLowerCase()] = false;
+});
 
-function canMoveTo(x, y, w, h) {
-  // Check grid cells the player would occupy
-  let leftCell = Math.floor(x / GRID_SIZE);
-  let rightCell = Math.floor((x + w - 1) / GRID_SIZE);
-  let topCell = Math.floor(y / GRID_SIZE);
-  let bottomCell = Math.floor((y + h - 1) / GRID_SIZE);
+// Helper: Check collision with solid blocks
+function canMoveTo(x,y,w,h){
+  // bounding box collision with grid blocks
+  let left = Math.floor(x/GRID_SIZE);
+  let right = Math.floor((x+w-1)/GRID_SIZE);
+  let top = Math.floor(y/GRID_SIZE);
+  let bottom = Math.floor((y+h-1)/GRID_SIZE);
 
-  // Check for collision with solid blocks in those cells
-  for(let gy = topCell; gy <= bottomCell; gy++) {
-    for(let gx = leftCell; gx <= rightCell; gx++) {
-      if(gy >= 0 && gy < GRID_HEIGHT && gx >= 0 && gx < GRID_WIDTH) {
-        if(grid[gy][gx] && grid[gy][gx].solid) {
-          return false;
-        }
-      }
+  if(left <0 || right >= GRID_COLS || top <0 || bottom >= GRID_ROWS){
+    return false;
+  }
+
+  for(let gy=top; gy<=bottom; gy++){
+    for(let gx=left; gx<=right; gx++){
+      if(grid[gy][gx] && grid[gy][gx].solid) return false;
     }
   }
   return true;
 }
 
-function update() {
-  // Horizontal movement attempt
+// Helper: Distance in grid squares between player grid pos and target grid pos
+function gridDistance(ax, ay, bx, by){
+  return Math.max(Math.abs(ax-bx), Math.abs(ay-by));
+}
+
+// Convert pixel coords to grid coords (invert y for bottom=0)
+function pixelToGrid(x,y){
+  let gx = Math.floor(x/GRID_SIZE);
+  let gy = GRID_ROWS-1 - Math.floor(y/GRID_SIZE);
+  return {gx, gy};
+}
+// Convert grid coords to pixel coords (invert y)
+function gridToPixel(gx, gy){
+  let px = gx * GRID_SIZE;
+  let py = (GRID_ROWS-1 - gy)*GRID_SIZE;
+  return {px, py};
+}
+
+// Mining logic
+function mineBlock(gx, gy){
+  if(!grid[gy][gx]) return;
+  player.miningHits++;
+  if(player.miningHits >= grid[gy][gx].durability){
+    // Destroy block
+    grid[gy][gx] = null;
+    player.miningHits = 0;
+    player.miningBlock = null;
+    // Make blocks above fall down
+    for(let row=gy+1; row<GRID_ROWS; row++){
+      if(grid[row][gx]){
+        grid[row-1][gx] = grid[row][gx];
+        grid[row][gx] = null;
+      } else break;
+    }
+  }
+}
+
+// Place block below player if possible
+function placeBlock(gx, gy){
+  if(gx<0 || gx>=GRID_COLS || gy<0 || gy>=GRID_ROWS) return;
+  if(grid[gy][gx]) return; // spot taken
+  grid[gy][gx] = {
+    type: 'stone',
+    durability: BLOCK_DURABILITY.stone,
+    color: '#cccccc',
+    pixels: null,
+    solid: true,
+  };
+}
+
+// Game loop update
+function update(){
+  // Handle horizontal movement
   let newX = player.x;
   if(keys.a) newX -= player.speed;
   if(keys.d) newX += player.speed;
-  if(canMoveTo(newX, player.y, player.width, player.height)) {
+  if(canMoveTo(newX, player.y, player.width, player.height)){
     player.x = newX;
   }
 
@@ -98,74 +210,207 @@ function update() {
   player.vy += player.gravity;
   let newY = player.y + player.vy;
 
-  if(player.vy > 0) { 
-    // Moving down
-    if(canMoveTo(player.x, newY, player.width, player.height)) {
+  if(player.vy > 0){
+    // falling down
+    if(canMoveTo(player.x, newY, player.width, player.height)){
       player.y = newY;
       player.grounded = false;
     } else {
-      // Collide with ground/block
       player.grounded = true;
       player.vy = 0;
-      // Snap player to top of block below
-      player.y = Math.floor((player.y + player.height) / GRID_SIZE) * GRID_SIZE - player.height;
+      // Snap to block top
+      player.y = Math.floor(player.y/GRID_SIZE)*GRID_SIZE;
     }
   } else {
-    // Moving up (jumping)
-    if(canMoveTo(player.x, newY, player.width, player.height)) {
+    // moving up
+    if(canMoveTo(player.x, newY, player.width, player.height)){
       player.y = newY;
       player.grounded = false;
     } else {
-      // Hit head on block
       player.vy = 0;
-      player.y = Math.floor(player.y / GRID_SIZE + 1) * GRID_SIZE;
     }
   }
 
   // Jump
-  if(keys.w && player.grounded) {
+  if(keys.w && player.grounded){
     player.vy = player.jumpStrength;
     player.grounded = false;
   }
+
+  // Mining or placing
+  // Determine mouse grid pos inverted
+  const mouseGrid = pixelToGrid(mouse.x, mouse.y);
+
+  // Player grid center
+  const playerGrid = pixelToGrid(player.x + player.width/2, player.y + player.height/2);
+
+  // Distance from player grid to mouse grid
+  const dist = gridDistance(playerGrid.gx, playerGrid.gy, mouseGrid.gx, mouseGrid.gy);
+
+  // Allow placing if within 1 grid space adjacent and below player (below or same row or left/right, but not above)
+  const placeAllowed = (
+    dist <= 1 &&
+    mouseGrid.gy <= playerGrid.gy // can't place above player
+  );
+
+  // If mouse is on a block in range
+  const blockAtMouse = grid[mouseGrid.gy] && grid[mouseGrid.gy][mouseGrid.gx];
+  const blockInRange = blockAtMouse && dist <= 1;
+
+  // Outline color for grid under mouse
+  let outlineColor = 'red';
+  if(placeAllowed && !blockAtMouse) outlineColor = 'lime';
+  if(blockInRange) outlineColor = 'lightcoral';
+
+  // Handle mining input (press "2")
+  if(keys['2'] && blockInRange){
+    if(player.miningBlock !== `${mouseGrid.gx},${mouseGrid.gy}`){
+      player.miningBlock = `${mouseGrid.gx},${mouseGrid.gy}`;
+      player.miningHits = 0;
+    }
+    mineBlock(mouseGrid.gx, mouseGrid.gy);
+  } else {
+    player.miningBlock = null;
+    player.miningHits = 0;
+  }
+
+  // Handle block placing (press "1")
+  if(keys['1'] && placeAllowed && !blockAtMouse){
+    placeBlock(mouseGrid.gx, mouseGrid.gy);
+    keys['1'] = false; // prevent hold placement
+  }
+
+  // Clamp player inside canvas
+  if(player.x < 0) player.x = 0;
+  if(player.x + player.width > canvas.width) player.x = canvas.width - player.width;
+  if(player.y < 0) player.y = 0;
+  if(player.y + player.height > canvas.height) player.y = canvas.height - player.height;
 }
 
-function draw() {
-  // Clear canvas
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+// Draw dirt block pixels
+function drawPixels(block, px, py){
+  if(!block.pixels) return;
+  for(const p of block.pixels){
+    ctx.fillStyle = p.color;
+    ctx.fillRect(px + p.x, py + p.y, 3, 3);
+  }
+}
+
+// Draw everything
+function draw(){
+  // Draw background inside grid
+  for(let y=0; y<GRID_ROWS; y++){
+    for(let x=0; x<GRID_COLS; x++){
+      let py = (GRID_ROWS-1 - y)*GRID_SIZE;
+      let px = x*GRID_SIZE;
+      if(y >= 10){
+        // Dark brown gradient down
+        let shade = Math.min(255, Math.floor(50 + (y-10)*20));
+        ctx.fillStyle = `rgb(${shade/5}, ${shade/8}, 0)`;
+      } else {
+        // Blue above y=500 (y=10 in grid)
+        ctx.fillStyle = '#4a90e2';
+      }
+      ctx.fillRect(px, py, GRID_SIZE, GRID_SIZE);
+    }
+  }
 
   // Draw blocks
-  for(let y=0; y<GRID_HEIGHT; y++) {
-    for(let x=0; x<GRID_WIDTH; x++) {
+  for(let y=0; y<GRID_ROWS; y++){
+    for(let x=0; x<GRID_COLS; x++){
       const block = grid[y][x];
-      if(block) {
+      if(block){
+        let py = (GRID_ROWS-1 - y)*GRID_SIZE;
+        let px = x*GRID_SIZE;
         ctx.fillStyle = block.color;
-        ctx.fillRect(x * GRID_SIZE, y * GRID_SIZE, GRID_SIZE, GRID_SIZE);
-        // Optional block border
+        ctx.fillRect(px, py, GRID_SIZE, GRID_SIZE);
+        drawPixels(block, px, py);
         ctx.strokeStyle = '#3a2a1a';
-        ctx.strokeRect(x * GRID_SIZE, y * GRID_SIZE, GRID_SIZE, GRID_SIZE);
+        ctx.strokeRect(px, py, GRID_SIZE, GRID_SIZE);
       }
     }
+  }
+
+  // Draw grid outline under mouse with appropriate color
+  const mouseGrid = pixelToGrid(mouse.x, mouse.y);
+  if(mouseGrid.gx >=0 && mouseGrid.gx < GRID_COLS && mouseGrid.gy >=0 && mouseGrid.gy < GRID_ROWS){
+    const playerGrid = pixelToGrid(player.x + player.width/2, player.y + player.height/2);
+    const dist = gridDistance(playerGrid.gx, playerGrid.gy, mouseGrid.gx, mouseGrid.gy);
+    const blockAtMouse = grid[mouseGrid.gy][mouseGrid.gx];
+    let outlineColor = 'red';
+    if(dist <= 1 && !blockAtMouse) outlineColor = 'lime';
+    else if(dist <= 1 && blockAtMouse) outlineColor = 'lightcoral';
+
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = outlineColor;
+    ctx.strokeRect(mouseGrid.gx*GRID_SIZE, (GRID_ROWS-1 - mouseGrid.gy)*GRID_SIZE, GRID_SIZE, GRID_SIZE);
   }
 
   // Draw player
   ctx.fillStyle = player.color;
   ctx.fillRect(player.x, player.y, player.width, player.height);
 
-  // Draw ground line (optional)
-  ctx.strokeStyle = 'yellow';
+  // Draw shovel pointing toward mouse
+  const shovelLength = 35;
+  const cx = player.x + player.width/2;
+  const cy = player.y + player.height/2;
+  let angle = Math.atan2(mouse.y - cy, mouse.x - cx);
+  ctx.strokeStyle = '#654321';
+  ctx.lineWidth = 6;
+  ctx.lineCap = 'round';
   ctx.beginPath();
-  ctx.moveTo(0, canvas.height);
-  ctx.lineTo(canvas.width, canvas.height);
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + Math.cos(angle)*shovelLength, cy + Math.sin(angle)*shovelLength);
+  ctx.stroke();
+
+  // Draw player health bar top right
+  const barWidth = 200;
+  const barHeight = 20;
+  ctx.fillStyle = 'black';
+  ctx.fillRect(canvas.width - barWidth - 20, 20, barWidth, barHeight);
+  ctx.fillStyle = 'red';
+  ctx.fillRect(canvas.width - barWidth - 20, 20, barWidth * (player.health/player.maxHealth), barHeight);
+  ctx.strokeStyle = 'white';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(canvas.width - barWidth - 20, 20, barWidth, barHeight);
+
+  // Draw coordinates bottom left
+  const playerGridPos = pixelToGrid(player.x + player.width/2, player.y + player.height/2);
+  coordsDiv.textContent = `X: ${playerGridPos.gx} Y: ${playerGridPos.gy}`;
+
+  // Draw hotbar below canvas
+  const hotbarY = canvas.height + 10;
+  const hotbarSlotSize = 100;
+  ctx.fillStyle = '#222';
+  ctx.fillRect(0, hotbarY, canvas.width, hotbarSlotSize);
+
+  // Draw 8 slots
+  ctx.strokeStyle = 'white';
+  for(let i=0; i<8; i++){
+    ctx.strokeRect(i*hotbarSlotSize, hotbarY, hotbarSlotSize, hotbarSlotSize);
+  }
+
+  // Draw block icon in slot 0
+  ctx.fillStyle = '#cccccc';
+  ctx.fillRect(10, hotbarY + 10, 80, 80);
+
+  // Draw shovel icon in slot 1 (simple)
+  ctx.strokeStyle = '#654321';
+  ctx.lineWidth = 8;
+  ctx.beginPath();
+  ctx.moveTo(120, hotbarY + 20);
+  ctx.lineTo(160, hotbarY + 60);
+  ctx.lineTo(140, hotbarY + 80);
   ctx.stroke();
 }
 
-function loop() {
+function gameLoop(){
   update();
   draw();
-  requestAnimationFrame(loop);
+  requestAnimationFrame(gameLoop);
 }
 
-loop();
+gameLoop();
 </script>
 </body>
 </html>
