@@ -51,11 +51,6 @@ document.addEventListener("keydown", (e) => {
 }
 });
 
-const alreadyExists = blocks.some(b => b.x === blockX && b.y === blockY);
-if (!alreadyExists) {
-  blocks.push({ x: blockX, y: blockY, width: 50, height: 50, color: "gray" });
-}
-
 function update() {
   // Horizontal movement
   if (keys.a) player.x -= player.speed;
