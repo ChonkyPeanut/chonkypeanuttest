@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Insane 2D Arcade Shooter with Power-ups & Timer</title>
+<title>Insane 2D Arcade Shooter with Power-ups, Bosses & Menus</title>
 <style>
   body, html {
     margin: 0; padding: 0; overflow: hidden; background: #111;
@@ -15,21 +15,27 @@
     margin: auto;
     background: linear-gradient(135deg, #222 0%, #000 100%);
   }
-  #score {
+  #score, #timer, #powerup-timers {
     position: fixed;
-    top: 10px; left: 10px;
-    color: #0f0;
     font-size: 20px;
     font-weight: bold;
+    text-shadow: 0 0 5px;
+    user-select: none;
+  }
+  #score {
+    top: 10px; left: 10px;
+    color: #0f0;
     text-shadow: 0 0 5px #0f0;
   }
   #timer {
-    position: fixed;
     top: 10px; right: 10px;
     color: #0ff;
-    font-size: 20px;
-    font-weight: bold;
     text-shadow: 0 0 5px #0ff;
+  }
+  #powerup-timers {
+    bottom: 10px; left: 10px;
+    color: #ff0;
+    text-shadow: 0 0 5px #ff0;
   }
   #health-bar {
     position: fixed;
@@ -47,13 +53,52 @@
     width: 100%;
     transition: width 0.3s ease;
   }
+  /* Menus */
+  #menu-overlay {
+    position: fixed;
+    top:0; left:0; width:100%; height:100%;
+    background: rgba(0,0,0,0.85);
+    color: #0f0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    font-family: monospace;
+    font-size: 32px;
+    user-select: none;
+  }
+  #menu-overlay button {
+    margin-top: 20px;
+    font-size: 24px;
+    padding: 10px 20px;
+    background: #0f0;
+    border: none;
+    cursor: pointer;
+    color: #000;
+    border-radius: 5px;
+    transition: background 0.3s ease;
+  }
+  #menu-overlay button:hover {
+    background: #0a0;
+  }
 </style>
 </head>
 <body>
 <div id="score">Score: 0</div>
 <div id="timer">Time: 0s</div>
+<div id="powerup-timers"></div>
 <div id="health-bar"><div id="health-bar-inner"></div></div>
 <canvas id="game"></canvas>
+
+<!-- Menus -->
+<div id="menu-overlay">
+  <div id="menu-text">INSANE 2D ARCADE SHOOTER</div>
+  <button id="start-btn">Start Game</button>
+  <button id="pause-btn" style="display:none;">Pause (P)</button>
+  <button id="resume-btn" style="display:none;">Resume</button>
+  <button id="restart-btn" style="display:none;">Restart</button>
+</div>
+
 <script>
 (() => {
   const canvas = document.getElementById('game');
@@ -63,11 +108,17 @@
   canvas.width = W;
   canvas.height = H;
 
+  // Game state
   let score = 0;
   let gameOver = false;
-  let startTime = Date.now();
+  let paused = false;
+  let startTime = 0;
+  let elapsedTime = 0;
+  let lastFrameTime = 0;
+  let shakeDuration = 0;
+  let shakeMagnitude = 10;
 
-  // Player object with health
+  // Player object with health and powerups
   const player = {
     x: W / 2,
     y: H / 2,
@@ -79,19 +130,23 @@
     health: 100,
     maxHealth: 100,
     powerups: {
-      speedBoost: 0, // duration frames remaining
+      speedBoost: 0, // frames remaining
       shield: 0,
     }
   };
 
   const keys = {};
-  window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+  window.addEventListener('keydown', e => {
+    keys[e.key.toLowerCase()] = true;
+    // Pause toggle (p)
+    if(e.key.toLowerCase() === 'p' && !gameOver && started) togglePause();
+  });
   window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
 
   // Bullets array
   const bullets = [];
 
-  // Enemies array
+  // Enemies array, with different types
   const enemies = [];
 
   // Particles array for explosions
@@ -100,78 +155,27 @@
   // Powerups array
   const powerups = [];
 
-  // Spawn enemies every interval (will get faster)
+  // Timers and intervals
   let enemySpawnInterval = 1000;
   let lastEnemySpawn = 0;
 
-  // Spawn powerups every interval
   let powerupSpawnInterval = 7000;
   let lastPowerupSpawn = 0;
 
-  // Utility: random number in range
+  // Boss related
+  let bossSpawned = false;
+  let boss = null;
+  const bossSpawnTime = 60000; // 1 minute after start
+
+  // Utility random number
   function randRange(min, max) {
     return Math.random() * (max - min) + min;
   }
 
-  // Player shooting cooldown
+  // Shooting cooldown
   let shootCooldown = 0;
 
-  // Game loop
-  function gameLoop(timestamp = 0) {
-    if (gameOver) {
-      drawGameOver();
-      return;
-    }
-    ctx.clearRect(0, 0, W, H);
-
-    updatePlayer();
-    updateBullets();
-    updateEnemies(timestamp);
-    updateParticles();
-    updatePowerups(timestamp);
-    drawAll();
-
-    shootCooldown = Math.max(0, shootCooldown - 1);
-
-    updateScore();
-    updateHealthBar();
-    updateTimer();
-
-    requestAnimationFrame(gameLoop);
-  }
-
-  // Update player position and controls
-  function updatePlayer() {
-    player.vx = 0;
-    player.vy = 0;
-
-    // Apply speed boost if powerup active
-    const currentSpeed = player.powerups.speedBoost > 0 ? player.speed * 1.5 : player.speed;
-
-    if (keys['w'] || keys['arrowup']) player.vy = -currentSpeed;
-    if (keys['s'] || keys['arrowdown']) player.vy = currentSpeed;
-    if (keys['a'] || keys['arrowleft']) player.vx = -currentSpeed;
-    if (keys['d'] || keys['arrowright']) player.vx = currentSpeed;
-
-    player.x += player.vx;
-    player.y += player.vy;
-
-    // Clamp inside screen
-    player.x = Math.min(Math.max(player.radius, player.x), W - player.radius);
-    player.y = Math.min(Math.max(player.radius, player.y), H - player.radius);
-
-    // Shooting (space or click)
-    if ((keys[' '] || keys['enter'] || keys['mouse']) && shootCooldown <= 0) {
-      shoot();
-      shootCooldown = 10;
-    }
-
-    // Decrease powerup timers
-    if (player.powerups.speedBoost > 0) player.powerups.speedBoost--;
-    if (player.powerups.shield > 0) player.powerups.shield--;
-  }
-
-  // Shoot bullet towards mouse position
+  // Mouse pos
   let mouseX = W / 2, mouseY = H / 2;
   window.addEventListener('mousemove', e => {
     mouseX = e.clientX;
@@ -180,8 +184,20 @@
   window.addEventListener('mousedown', e => keys['mouse'] = true);
   window.addEventListener('mouseup', e => keys['mouse'] = false);
 
+  // Sounds
+  const sounds = {
+    shoot: new Audio('https://freesound.org/data/previews/341/341695_6245762-lq.mp3'), // laser
+    explosion: new Audio('https://freesound.org/data/previews/235/235968_3980957-lq.mp3'), // explosion
+    powerup: new Audio('https://freesound.org/data/previews/331/331912_3248244-lq.mp3'), // powerup pickup
+    damage: new Audio('https://freesound.org/data/previews/198/198844_2859976-lq.mp3'), // damage taken
+    bossRoar: new Audio('https://freesound.org/data/previews/331/331912_3248244-lq.mp3'), // reuse powerup for boss roar placeholder
+  };
+
+  // Preload sounds volume settings
+  for (const s of Object.values(sounds)) s.volume = 0.3;
+
+  // Player shooting
   function shoot() {
-    // Calculate direction vector from player to mouse
     let dx = mouseX - player.x;
     let dy = mouseY - player.y;
     let dist = Math.sqrt(dx*dx + dy*dy);
@@ -195,99 +211,92 @@
       radius: 5,
       color: '#0ff',
     });
+    sounds.shoot.currentTime = 0;
+    sounds.shoot.play();
   }
 
-  // Update bullets and remove off-screen
-  function updateBullets() {
-    for(let i = bullets.length-1; i>=0; i--) {
-      const b = bullets[i];
-      b.x += b.vx;
-      b.y += b.vy;
-      if(b.x < 0 || b.x > W || b.y < 0 || b.y > H) {
-        bullets.splice(i, 1);
-        continue;
-      }
-      // Check collision with enemies
-      for(let j = enemies.length-1; j>=0; j--) {
-        const e = enemies[j];
-        const dist = Math.hypot(e.x - b.x, e.y - b.y);
-        if(dist < e.radius + b.radius) {
-          createExplosion(e.x, e.y, e.color);
-          enemies.splice(j,1);
-          bullets.splice(i,1);
-          score += 10;
-          break;
-        }
-      }
+  // Classes for enemies & boss
+  class Enemy {
+    constructor(x,y,type='normal'){
+      this.x = x;
+      this.y = y;
+      this.type = type;
+      this.radius = type === 'boss' ? 70 : randRange(15,25);
+      this.speed = type === 'boss' ? 1.2 : randRange(1,2);
+      this.color = type === 'boss' ? '#f55' : ['#f00','#f80','#ff0','#0f0','#0ff','#08f','#f0f'][Math.floor(randRange(0,7))];
+      this.health = type === 'boss' ? 150 : 1;
+      this.maxHealth = this.health;
+      this.hitCooldown = 0;
     }
-  }
-
-  // Spawn enemies & update them
-  function updateEnemies(timestamp) {
-    if(timestamp - lastEnemySpawn > enemySpawnInterval) {
-      spawnEnemy();
-      lastEnemySpawn = timestamp;
-      // Gradually spawn faster but not too fast
-      if(enemySpawnInterval > 400) enemySpawnInterval -= 8;
-    }
-
-    for(let i = enemies.length-1; i >= 0; i--) {
-      const e = enemies[i];
-      // Move towards player
-      let dx = player.x - e.x;
-      let dy = player.y - e.y;
+    update() {
+      let dx = player.x - this.x;
+      let dy = player.y - this.y;
       let dist = Math.sqrt(dx*dx + dy*dy);
       dx /= dist;
       dy /= dist;
 
-      // Increase enemy speed over time
-      e.speed += 0.001;
+      // Boss moves slower but with more health
+      this.speed += 0.0005; // slowly speeds up over time
 
-      e.x += dx * e.speed;
-      e.y += dy * e.speed;
+      this.x += dx * this.speed;
+      this.y += dy * this.speed;
+
+      if(this.hitCooldown > 0) this.hitCooldown--;
 
       // Check collision with player
-      if(dist < e.radius + player.radius) {
-        // If shield powerup active, block damage and destroy enemy
+      if(dist < this.radius + player.radius) {
         if(player.powerups.shield > 0) {
-          createExplosion(e.x, e.y, e.color);
-          enemies.splice(i, 1);
-          score += 5; // reward a bit for shielded kills
-        } else {
-          // Damage player & enemy dies
-          createExplosion(e.x, e.y, e.color);
-          enemies.splice(i, 1);
-          player.health -= 15;
-          if(player.health <= 0) {
-            player.health = 0;
-            gameOver = true;
+          // Shield blocks damage but boss takes damage
+          if(this.hitCooldown === 0) {
+            this.health--;
+            this.hitCooldown = 30; // invincibility frames for boss
+            createExplosion(this.x, this.y, this.color);
+            if(this.health <= 0) {
+              score += 100;
+              createExplosion(this.x, this.y, this.color);
+              enemies.splice(enemies.indexOf(this), 1);
+              boss = null;
+              bossSpawned = false;
+            }
           }
+        } else {
+          playerTakeDamage(20);
+          // Boss does not die on player collision here
         }
       }
     }
+    draw(ctx) {
+      ctx.fillStyle = this.color;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
+      ctx.fill();
+
+      // Boss health bar above it
+      if(this.type === 'boss') {
+        const barWidth = this.radius * 2;
+        const barHeight = 10;
+        const healthPercent = this.health / this.maxHealth;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(this.x - this.radius, this.y - this.radius - 20, barWidth, barHeight);
+        ctx.fillStyle = `rgb(${(1-healthPercent)*255},${healthPercent*255},0)`;
+        ctx.fillRect(this.x - this.radius, this.y - this.radius - 20, barWidth * healthPercent, barHeight);
+      }
+
+      // Eyes for normal enemies & boss
+      ctx.fillStyle = 'white';
+      ctx.beginPath();
+      ctx.arc(this.x - this.radius/3, this.y - this.radius/3, this.radius/5, 0, Math.PI*2);
+      ctx.arc(this.x + this.radius/3, this.y - this.radius/3, this.radius/5, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = 'black';
+      ctx.beginPath();
+      ctx.arc(this.x - this.radius/3, this.y - this.radius/3, this.radius/10, 0, Math.PI*2);
+      ctx.arc(this.x + this.radius/3, this.y - this.radius/3, this.radius/10, 0, Math.PI*2);
+      ctx.fill();
+    }
   }
 
-  // Spawn an enemy at random edge with random speed and color
-  function spawnEnemy() {
-    const side = Math.floor(randRange(0,4)); // 0 top,1 right,2 bottom,3 left
-    let x,y;
-    if(side === 0) { x = randRange(0,W); y = -30; }
-    else if(side === 1) { x = W+30; y = randRange(0,H); }
-    else if(side === 2) { x = randRange(0,W); y = H+30; }
-    else { x = -30; y = randRange(0,H); }
-    const colors = ['#f00','#f80','#ff0','#0f0','#0ff','#08f','#f0f'];
-    enemies.push({
-      x, y,
-      radius: randRange(15,25),
-      speed: randRange(1,2),  // start speed lower, will increase gradually
-      color: colors[Math.floor(randRange(0,colors.length))],
-    });
-  }
-
-  // Powerup types:
-  // - health: restores 30 health
-  // - speed: speed boost for 5 seconds (300 frames)
-  // - shield: shield for 5 seconds (300 frames)
+  // Powerup class
   class Powerup {
     constructor(x, y, type){
       this.x = x;
@@ -299,8 +308,11 @@
         speed: '#5af',
         shield: '#ff5',
       }[type];
+      this.alpha = 1;
     }
     draw(ctx) {
+      ctx.save();
+      ctx.globalAlpha = this.alpha;
       ctx.fillStyle = this.color;
       ctx.beginPath();
       ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
@@ -315,42 +327,7 @@
         shield: 'D'
       }[this.type];
       ctx.fillText(symbol, this.x, this.y + 1);
-    }
-  }
-
-  // Spawn powerups randomly on the map
-  function updatePowerups(timestamp) {
-    if(timestamp - lastPowerupSpawn > powerupSpawnInterval) {
-      spawnPowerup();
-      lastPowerupSpawn = timestamp;
-    }
-
-    // Check player collision with powerups
-    for(let i = powerups.length-1; i >= 0; i--) {
-      const p = powerups[i];
-      const dist = Math.hypot(player.x - p.x, player.y - p.y);
-      if(dist < player.radius + p.radius) {
-        applyPowerup(p.type);
-        powerups.splice(i, 1);
-      }
-    }
-  }
-
-  function spawnPowerup() {
-    const x = randRange(50, W - 50);
-    const y = randRange(50, H - 50);
-    const types = ['health','speed','shield'];
-    const type = types[Math.floor(randRange(0, types.length))];
-    powerups.push(new Powerup(x,y,type));
-  }
-
-  function applyPowerup(type) {
-    if(type === 'health') {
-      player.health = Math.min(player.health + 30, player.maxHealth);
-    } else if(type === 'speed') {
-      player.powerups.speedBoost = 300; // 5 seconds at 60fps
-    } else if(type === 'shield') {
-      player.powerups.shield = 300;
+      ctx.restore();
     }
   }
 
@@ -383,11 +360,138 @@
       ctx.restore();
     }
   }
+
+  // Functions
+
   function createExplosion(x,y,color){
+    sounds.explosion.currentTime = 0;
+    sounds.explosion.play();
     for(let i=0; i<30; i++){
       particles.push(new Particle(x,y,color));
     }
   }
+
+  function playerTakeDamage(amount) {
+    if(player.powerups.shield > 0) return; // no damage if shield active
+    player.health -= amount;
+    if(player.health < 0) player.health = 0;
+    shakeDuration = 15; // start screen shake
+    sounds.damage.currentTime = 0;
+    sounds.damage.play();
+    if(player.health === 0) {
+      gameOver = true;
+      showGameOverMenu();
+    }
+  }
+
+  // Spawn enemy at random edge
+  function spawnEnemy(type='normal') {
+    const side = Math.floor(randRange(0,4));
+    let x,y;
+    if(side === 0) { x = randRange(0,W); y = -30; }
+    else if(side === 1) { x = W+30; y = randRange(0,H); }
+    else if(side === 2) { x = randRange(0,W); y = H+30; }
+    else { x = -30; y = randRange(0,H); }
+
+    enemies.push(new Enemy(x,y,type));
+  }
+
+  // Spawn powerup randomly on map
+  function spawnPowerup() {
+    const x = randRange(50, W - 50);
+    const y = randRange(50, H - 50);
+    const types = ['health','speed','shield'];
+    const type = types[Math.floor(randRange(0, types.length))];
+    powerups.push(new Powerup(x,y,type));
+  }
+
+  // Apply powerup effects to player
+  function applyPowerup(type) {
+    sounds.powerup.currentTime = 0;
+    sounds.powerup.play();
+    if(type === 'health') {
+      player.health = Math.min(player.health + 30, player.maxHealth);
+    } else if(type === 'speed') {
+      player.powerups.speedBoost = 300; // 5 seconds
+    } else if(type === 'shield') {
+      player.powerups.shield = 300;
+    }
+  }
+
+  // Update bullets & collision
+  function updateBullets() {
+    for(let i = bullets.length-1; i>=0; i--) {
+      const b = bullets[i];
+      b.x += b.vx;
+      b.y += b.vy;
+      if(b.x < 0 || b.x > W || b.y < 0 || b.y > H) {
+        bullets.splice(i, 1);
+        continue;
+      }
+      // Check collision with enemies
+      for(let j = enemies.length-1; j>=0; j--) {
+        const e = enemies[j];
+        const dist = Math.hypot(e.x - b.x, e.y - b.y);
+        if(dist < e.radius + b.radius) {
+          createExplosion(e.x, e.y, e.color);
+          bullets.splice(i,1);
+
+          if(e.type === 'boss'){
+            e.health--;
+            if(e.health <= 0) {
+              score += 100;
+              enemies.splice(j,1);
+              boss = null;
+              bossSpawned = false;
+            }
+          } else {
+            score += 10;
+            enemies.splice(j,1);
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  // Update enemies (move, collide with player)
+  function updateEnemies(timestamp) {
+    // Spawn normal enemies faster over time
+    if(timestamp - lastEnemySpawn > enemySpawnInterval) {
+      if(!bossSpawned && elapsedTime > bossSpawnTime) {
+        spawnEnemy('boss');
+        bossSpawned = true;
+        boss = enemies[enemies.length-1];
+        sounds.bossRoar.currentTime = 0;
+        sounds.bossRoar.play();
+      } else if(!bossSpawned) {
+        spawnEnemy('normal');
+      }
+      lastEnemySpawn = timestamp;
+      if(enemySpawnInterval > 400) enemySpawnInterval -= 8;
+    }
+
+    enemies.forEach(e => e.update());
+  }
+
+  // Update powerups (spawn & check pickup)
+  function updatePowerups(timestamp) {
+    if(timestamp - lastPowerupSpawn > powerupSpawnInterval) {
+      spawnPowerup();
+      lastPowerupSpawn = timestamp;
+    }
+
+    for(let i = powerups.length-1; i >= 0; i--) {
+      const p = powerups[i];
+      const dist = Math.hypot(player.x - p.x, player.y - p.y);
+      if(dist < player.radius + p.radius) {
+        applyPowerup(p.type);
+        powerups.splice(i, 1);
+      }
+    }
+  }
+
+  // Update particles
   function updateParticles() {
     for(let i=particles.length-1; i>=0; i--) {
       particles[i].update();
@@ -395,79 +499,117 @@
     }
   }
 
-  // Draw all objects
-  function drawAll() {
-    // Player
+  // Update player movement and shooting
+  function updatePlayer() {
+    player.vx = 0;
+    player.vy = 0;
+    let currentSpeed = player.speed;
+    if(player.powerups.speedBoost > 0) currentSpeed *= 1.5;
+
+    if (keys['w'] || keys['arrowup']) player.vy = -currentSpeed;
+    if (keys['s'] || keys['arrowdown']) player.vy = currentSpeed;
+    if (keys['a'] || keys['arrowleft']) player.vx = -currentSpeed;
+    if (keys['d'] || keys['arrowright']) player.vx = currentSpeed;
+
+    player.x += player.vx;
+    player.y += player.vy;
+
+    // Clamp inside screen
+    player.x = Math.min(Math.max(player.radius, player.x), W - player.radius);
+    player.y = Math.min(Math.max(player.radius, player.y), H - player.radius);
+
+    // Shooting (space, enter, mouse)
+    if ((keys[' '] || keys['enter'] || keys['mouse']) && shootCooldown <= 0) {
+      shoot();
+      shootCooldown = 10;
+    }
+
+    // Reduce powerup timers
+    if(player.powerups.speedBoost > 0) player.powerups.speedBoost--;
+    if(player.powerups.shield > 0) player.powerups.shield--;
+  }
+
+  // Draw player and shield
+  function drawPlayer() {
+    // Shield circle
+    if(player.powerups.shield > 0) {
+      ctx.save();
+      ctx.strokeStyle = '#ff5';
+      ctx.lineWidth = 6;
+      ctx.shadowColor = '#ff5';
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(player.x, player.y, player.radius + 10, 0, Math.PI*2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     ctx.fillStyle = player.color;
     ctx.beginPath();
     ctx.arc(player.x, player.y, player.radius, 0, Math.PI*2);
     ctx.fill();
+  }
 
-    // If shield active, draw shield ring
-    if(player.powerups.shield > 0) {
-      ctx.strokeStyle = '#ff0';
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.arc(player.x, player.y, player.radius + 6, 0, Math.PI*2);
-      ctx.stroke();
-    }
+  // Draw enemies
+  function drawEnemies() {
+    enemies.forEach(e => e.draw(ctx));
+  }
 
-    // Bullets
-    for(let b of bullets) {
+  // Draw bullets
+  function drawBullets() {
+    bullets.forEach(b => {
       ctx.fillStyle = b.color;
       ctx.beginPath();
       ctx.arc(b.x, b.y, b.radius, 0, Math.PI*2);
       ctx.fill();
-    }
-
-    // Enemies
-    for(let e of enemies) {
-      ctx.fillStyle = e.color;
-      ctx.beginPath();
-      ctx.arc(e.x, e.y, e.radius, 0, Math.PI*2);
-      ctx.fill();
-      // Eye effect
-      ctx.fillStyle = 'white';
-      ctx.beginPath();
-      ctx.arc(e.x - e.radius/3, e.y - e.radius/3, e.radius/5, 0, Math.PI*2);
-      ctx.arc(e.x + e.radius/3, e.y - e.radius/3, e.radius/5, 0, Math.PI*2);
-      ctx.fill();
-      ctx.fillStyle = 'black';
-      ctx.beginPath();
-      ctx.arc(e.x - e.radius/3, e.y - e.radius/3, e.radius/10, 0, Math.PI*2);
-      ctx.arc(e.x + e.radius/3, e.y - e.radius/3, e.radius/10, 0, Math.PI*2);
-      ctx.fill();
-    }
-
-    // Powerups
-    for(let p of powerups){
-      p.draw(ctx);
-    }
-
-    // Particles
-    for(let p of particles){
-      p.draw(ctx);
-    }
+    });
   }
 
-  function updateScore() {
+  // Draw powerups
+  function drawPowerups() {
+    powerups.forEach(p => p.draw(ctx));
+  }
+
+  // Draw particles
+  function drawParticles() {
+    particles.forEach(p => p.draw(ctx));
+  }
+
+  // Update score and health bar UI
+  function updateUI() {
     document.getElementById('score').innerText = `Score: ${score}`;
-  }
-  function updateHealthBar() {
-    const healthPercent = (player.health / player.maxHealth) * 100;
-    document.getElementById('health-bar-inner').style.width = healthPercent + '%';
-    // Change health bar color (green -> red)
-    const green = Math.floor(healthPercent * 2.55);
-    const red = 255 - green;
-    document.getElementById('health-bar-inner').style.backgroundColor = `rgb(${red},${green},0)`;
-  }
-  function updateTimer() {
-    const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
-    document.getElementById('timer').innerText = `Time: ${elapsedSeconds}s`;
+    document.getElementById('timer').innerText = `Time: ${Math.floor(elapsedTime/1000)}s`;
+
+    // Health bar width & color
+    const hpPercent = player.health / player.maxHealth;
+    const healthBarInner = document.getElementById('health-bar-inner');
+    healthBarInner.style.width = `${hpPercent*100}%`;
+    // Color from green to red
+    healthBarInner.style.background = `rgb(${(1 - hpPercent) * 255}, ${hpPercent * 255}, 0)`;
+
+    // Powerup timers display
+    const timersDiv = document.getElementById('powerup-timers');
+    let texts = [];
+    if(player.powerups.speedBoost > 0) texts.push(`Speed Boost: ${(player.powerups.speedBoost/60).toFixed(1)}s`);
+    if(player.powerups.shield > 0) texts.push(`Shield: ${(player.powerups.shield/60).toFixed(1)}s`);
+    timersDiv.innerText = texts.join(' | ');
   }
 
+  // Screen shake effect
+  function applyScreenShake() {
+    if(shakeDuration > 0) {
+      const dx = (Math.random() - 0.5) * shakeMagnitude;
+      const dy = (Math.random() - 0.5) * shakeMagnitude;
+      ctx.setTransform(1, 0, 0, 1, dx, dy);
+      shakeDuration--;
+    } else {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
+  }
+
+  // Draw game over screen
   function drawGameOver() {
-    ctx.fillStyle = 'rgba(0,0,0,0.8)';
+    ctx.fillStyle = 'rgba(0,0,0,0.85)';
     ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = 'red';
     ctx.font = '72px monospace';
@@ -475,15 +617,156 @@
     ctx.fillText('GAME OVER', W/2, H/2);
     ctx.font = '36px monospace';
     ctx.fillText(`Final Score: ${score}`, W/2, H/2 + 60);
-    ctx.fillText(`Time Survived: ${Math.floor((Date.now() - startTime)/1000)}s`, W/2, H/2 + 110);
-    ctx.fillText('Refresh to play again!', W/2, H/2 + 160);
+    ctx.fillText(`Time Survived: ${Math.floor(elapsedTime/1000)}s`, W/2, H/2 + 110);
   }
 
-  updateScore();
-  updateHealthBar();
-  updateTimer();
-  gameLoop();
+  // Draw start menu
+  const menuOverlay = document.getElementById('menu-overlay');
+  const startBtn = document.getElementById('start-btn');
+  const pauseBtn = document.getElementById('pause-btn');
+  const resumeBtn = document.getElementById('resume-btn');
+  const restartBtn = document.getElementById('restart-btn');
+  const menuText = document.getElementById('menu-text');
 
+  let started = false;
+
+  function showStartMenu() {
+    menuOverlay.style.display = 'flex';
+    startBtn.style.display = 'inline-block';
+    pauseBtn.style.display = 'none';
+    resumeBtn.style.display = 'none';
+    restartBtn.style.display = 'none';
+    menuText.innerText = 'INSANE 2D ARCADE SHOOTER';
+  }
+
+  function showPauseMenu() {
+    menuOverlay.style.display = 'flex';
+    startBtn.style.display = 'none';
+    pauseBtn.style.display = 'none';
+    resumeBtn.style.display = 'inline-block';
+    restartBtn.style.display = 'inline-block';
+    menuText.innerText = 'PAUSED';
+  }
+
+  function showGameOverMenu() {
+    menuOverlay.style.display = 'flex';
+    startBtn.style.display = 'none';
+    pauseBtn.style.display = 'none';
+    resumeBtn.style.display = 'none';
+    restartBtn.style.display = 'inline-block';
+    menuText.innerText = 'GAME OVER';
+  }
+
+  startBtn.onclick = () => {
+    startGame();
+  };
+
+  pauseBtn.onclick = () => {
+    togglePause();
+  };
+
+  resumeBtn.onclick = () => {
+    togglePause();
+  };
+
+  restartBtn.onclick = () => {
+    resetGame();
+  };
+
+  function togglePause() {
+    if(gameOver) return;
+    paused = !paused;
+    if(paused) {
+      showPauseMenu();
+    } else {
+      menuOverlay.style.display = 'none';
+      lastFrameTime = performance.now();
+      requestAnimationFrame(gameLoop);
+    }
+  }
+
+  // Reset game state to initial
+  function resetGame() {
+    score = 0;
+    gameOver = false;
+    paused = false;
+    player.x = W / 2;
+    player.y = H / 2;
+    player.health = player.maxHealth;
+    player.powerups.speedBoost = 0;
+    player.powerups.shield = 0;
+    bullets.length = 0;
+    enemies.length = 0;
+    particles.length = 0;
+    powerups.length = 0;
+    enemySpawnInterval = 1000;
+    lastEnemySpawn = 0;
+    lastPowerupSpawn = 0;
+    bossSpawned = false;
+    boss = null;
+    elapsedTime = 0;
+    startTime = performance.now();
+    menuOverlay.style.display = 'none';
+    shootCooldown = 0;
+    started = true;
+    lastFrameTime = performance.now();
+    requestAnimationFrame(gameLoop);
+  }
+
+  function startGame() {
+    resetGame();
+    pauseBtn.style.display = 'inline-block';
+  }
+
+  // Main game loop
+  function gameLoop(timestamp = 0) {
+    if(!started) return;
+    if(paused || gameOver) {
+      if(gameOver) drawGameOver();
+      return;
+    }
+    if(!lastFrameTime) lastFrameTime = timestamp;
+    const delta = timestamp - lastFrameTime;
+    elapsedTime += delta;
+    lastFrameTime = timestamp;
+
+    // Clear canvas
+    ctx.clearRect(0, 0, W, H);
+
+    // Apply screen shake if any
+    applyScreenShake();
+
+    // Update game entities
+    updatePlayer();
+    updateBullets();
+    updateEnemies(timestamp);
+    updatePowerups(timestamp);
+    updateParticles();
+
+    // Draw entities
+    drawPlayer();
+    drawBullets();
+    drawEnemies();
+    drawPowerups();
+    drawParticles();
+
+    // Draw UI
+    updateUI();
+
+    // Shoot cooldown decrement
+    shootCooldown = Math.max(0, shootCooldown - 1);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Initial show start menu
+  showStartMenu();
+
+  // Resize canvas on window resize
+  window.addEventListener('resize', () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  });
 })();
 </script>
 </body>
