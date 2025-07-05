@@ -31,6 +31,21 @@ document.addEventListener("keydown", (e) => {
 document.addEventListener("keyup", (e) => {
   if (keys.hasOwnProperty(e.key)) keys[e.key] = false;
 });
+document.addEventListener("keydown", (e) => {
+  if (keys.hasOwnProperty(e.key)) keys[e.key] = true;
+
+  if (e.key === "1") {
+    // Place a block at player's current position
+    blocks.push({
+      x: Math.floor(player.x / 50) * 50,
+      y: Math.floor((player.y + player.height) / 50) * 50,
+      width: 50,
+      height: 50,
+      color: "gray"
+    });
+  }
+});
+
 
 function update() {
   // Horizontal movement
@@ -64,9 +79,20 @@ function update() {
 
 // Draw player
 function draw() {
+  function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Draw placed blocks
+  for (let block of blocks) {
+    ctx.fillStyle = block.color;
+    ctx.fillRect(block.x, block.y, block.width, block.height);
+  }
+
+  // Draw player
   ctx.fillStyle = player.color;
   ctx.fillRect(player.x, player.y, player.width, player.height);
+}
+
 }
 
 // Game loop
