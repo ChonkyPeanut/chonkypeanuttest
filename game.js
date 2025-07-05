@@ -38,7 +38,7 @@ document.addEventListener("keydown", (e) => {
       y: Math.floor((player.y + player.height) / 50) * 50,
       width: 50,
       height: 50,
-      color: "gray"
+      color: "white"
     });
   }
 });
