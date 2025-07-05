@@ -78,13 +78,6 @@ function update() {
 
     
   }
-
-  // Allow jumping only when grounded
-  if (keys.w && player.grounded) {
-    player.vy = player.jumpStrength;
-    player.grounded = false;
-  }
-
   // Floor collision
   const floorY = canvas.height - player.height;
   if (player.y > floorY) {
@@ -128,6 +121,11 @@ function update() {
     }
   }
 }
+    // Allow jumping only when grounded
+  if (keys.w && player.grounded) {
+    player.vy = player.jumpStrength;
+    player.grounded = false;
+  }
 }
 
 function draw() {
