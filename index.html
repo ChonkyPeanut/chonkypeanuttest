@@ -158,7 +158,7 @@
     y: H / 2,
     radius: 20,
     speed: 6,
-    color: '#0f0',
+    color: '#f00', // bright red player color
     vx: 0,
     vy: 0,
     maxHealth: 100,
@@ -175,7 +175,18 @@
     rifle: { name: 'Rifle', ammo: 30, maxAmmo: 30, damage: 12, fireRate: 100, bulletSpeed: 18, radius: 6, color: '#08f' },
     smg: { name: 'SMG', ammo: 50, maxAmmo: 50, damage: 6, fireRate: 60, bulletSpeed: 14, radius: 4, color: '#f80' },
     sniper: { name: 'Sniper', ammo: 5, maxAmmo: 5, damage: 50, fireRate: 600, bulletSpeed: 30, radius: 7, color: '#f00' },
-    grenade: { name: 'Grenade', ammo: 5, maxAmmo: 5, damage: 80, fireRate: 800, bulletSpeed: 0, radius: 10, color: '#fa0' }
+    shotgun: { 
+      name: 'Shotgun', 
+      ammo: 8, 
+      maxAmmo: 8, 
+      damage: 10, 
+      fireRate: 1000, 
+      bulletSpeed: 14, 
+      radius: 5, 
+      color: '#ff0',
+      pellets: 6,      // number of pellets per shot
+      spread: 0.3     // radians spread
+    }
   };
   let currentWeaponKey = 'pistol';
 
@@ -201,7 +212,7 @@
       case '2': currentWeaponKey = 'rifle'; break;
       case '3': currentWeaponKey = 'smg'; break;
       case '4': currentWeaponKey = 'sniper'; break;
-      case '5': currentWeaponKey = 'grenade'; break;
+      case '5': currentWeaponKey = 'shotgun'; break;
     }
     updateAmmoDisplay();
     updateReloadDisplay();
@@ -278,22 +289,25 @@
     dx /= dist;
     dy /= dist;
 
-    // For grenade: launch with arc (simplified here)
-    if(currentWeaponKey === 'grenade') {
-      bullets.push({
-        x: player.x,
-        y: player.y,
-        vx: dx * 10,
-        vy: dy * 10,
-        radius: weapon.radius,
-        color: weapon.color,
-        damage: weapon.damage,
-        grenade: true,
-        fuse: 1800,
-        timer: 0,
-        gravity: 0.3
-      });
+    if(currentWeaponKey === 'shotgun') {
+      // Shoot multiple pellets with spread
+      const pellets = weapons.shotgun.pellets;
+      const spread = weapons.shotgun.spread;
+      for(let i = 0; i < pellets; i++) {
+        const angle = Math.atan2(dy, dx) + (Math.random() * spread - spread/2);
+        bullets.push({
+          x: player.x + Math.cos(angle)*player.radius,
+          y: player.y + Math.sin(angle)*player.radius,
+          vx: Math.cos(angle) * weapon.bulletSpeed,
+          vy: Math.sin(angle) * weapon.bulletSpeed,
+          radius: weapon.radius,
+          color: weapon.color,
+          damage: weapon.damage,
+          grenade: false
+        });
+      }
     } else {
+      // Normal single bullet
       bullets.push({
         x: player.x + dx * player.radius,
         y: player.y + dy * player.radius,
@@ -444,29 +458,8 @@
     for(let i = bullets.length - 1; i >= 0; i--) {
       const b = bullets[i];
 
-      if(b.grenade) {
-        b.vy += b.gravity;
-        b.x += b.vx;
-        b.y += b.vy;
-        b.timer += 16;
-        if(b.timer >= b.fuse) {
-          createExplosion(b.x, b.y, '#fa0');
-          // Damage enemies in radius
-          enemies.forEach((e) => {
-            const dx = b.x - e.x;
-            const dy = b.y - e.y;
-            if(Math.sqrt(dx*dx + dy*dy) < 100) {
-              e.health -= b.damage;
-            }
-          });
-          bullets.splice(i, 1);
-          playSound('explosion');
-          continue;
-        }
-      } else {
-        b.x += b.vx;
-        b.y += b.vy;
-      }
+      b.x += b.vx;
+      b.y += b.vy;
 
       // Remove bullet if out of bounds
       if(b.x < -50 || b.x > W+50 || b.y < -50 || b.y > H+50) {
@@ -671,6 +664,8 @@
     resumeBtn.style.display = !start && !gameOver ? 'inline-block' : 'none';
     restartBtn.style.display = !start && gameOver ? 'inline-block' : 'none';
     pauseBtn.style.display = start ? 'none' : 'inline-block';
+    if(!start) menuOverlay.querySelector('#menu-text').textContent = gameOver ? 'GAME OVER' : 'PAUSED';
+    else menuOverlay.querySelector('#menu-text').textContent = 'INSANE 2D ARCADE SHOOTER';
   }
   function hideMenu() {
     menuOverlay.style.display = 'none';
@@ -678,7 +673,6 @@
   }
   function showGameOverMenu() {
     showMenu(false);
-    menuOverlay.querySelector('#menu-text').textContent = 'GAME OVER';
     pauseBtn.style.display = 'none';
   }
 
@@ -814,7 +808,6 @@
     paused = !paused;
     if(paused) {
       showMenu(false);
-      menuOverlay.querySelector('#menu-text').textContent = 'PAUSED';
     } else {
       hideMenu();
       lastFrameTime = performance.now();
