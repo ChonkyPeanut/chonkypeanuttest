@@ -25,9 +25,6 @@ const keys = {
 };
 
 // Keydown & keyup listeners
-document.addEventListener("keydown", (e) => {
-  if (keys.hasOwnProperty(e.key)) keys[e.key] = true;
-});
 document.addEventListener("keyup", (e) => {
   if (keys.hasOwnProperty(e.key)) keys[e.key] = false;
 });
@@ -77,9 +74,7 @@ function update() {
   }
 }
 
-// Draw player
 function draw() {
-  function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   // Draw placed blocks
@@ -93,7 +88,6 @@ function draw() {
   ctx.fillRect(player.x, player.y, player.width, player.height);
 }
 
-}
 
 // Game loop
 function loop() {
