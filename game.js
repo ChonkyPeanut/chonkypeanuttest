@@ -9,7 +9,10 @@ let player = {
   height: 50,
   speed: 4,
   color: "lime",
-  gravity: -1
+  vy: 0,            // vertical velocity
+  gravity: 0.5,     // gravity strength
+  jumpStrength: -10,
+  grounded: false
 };
 
 // WASD key state
@@ -28,21 +31,34 @@ document.addEventListener("keyup", (e) => {
   if (keys.hasOwnProperty(e.key)) keys[e.key] = false;
 });
 
-// Update player position
 function update() {
-  if (keys.w) player.y -= player.speed;
-  if (keys.s) player.y += player.speed;
+  // Horizontal movement
   if (keys.a) player.x -= player.speed;
   if (keys.d) player.x += player.speed;
 
-  // Clamp position to canvas borders
-  if (player.x < 0) player.x = 0;
-  if (player.y < 0) player.y = 0;
-  if (player.x + player.width > canvas.width) player.x = canvas.width - player.width;
-  if (player.y + player.height > canvas.height) player.y = canvas.height - player.height;
+  // Jumping
+  if (keys.w && player.grounded) {
+    player.vy = player.jumpStrength;
+    player.grounded = false;
+  }
 
-  if (player.gravity != 0) = true;
-    player.y += player.speed += player.gravity;
+  // Apply gravity
+  player.vy += player.gravity;
+  player.y += player.vy;
+
+  // Floor collision
+  const floorY = canvas.height - player.height;
+  if (player.y > floorY) {
+    player.y = floorY;
+    player.vy = 0;
+    player.grounded = true;
+  }
+
+  // Border clamp (left/right only)
+  if (player.x < 0) player.x = 0;
+  if (player.x + player.width > canvas.width) {
+    player.x = canvas.width - player.width;
+  }
 }
 
 // Draw player
