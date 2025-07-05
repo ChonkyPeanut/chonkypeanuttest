@@ -33,6 +33,7 @@ function update() {
   if (keys.s) player.y += player.speed;
   if (keys.a) player.x -= player.speed;
   if (keys.d) player.x += player.speed;
+  if (keys.w)&&(player.y >= canvas.height) player.y += player.speed;
 }
 
 // Draw player
