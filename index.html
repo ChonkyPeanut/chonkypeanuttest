@@ -3,12 +3,13 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Insane 2D Arcade Shooter with Power-ups, Bosses & Menus</title>
+<title>Insane 2D Arcade Shooter</title>
 <style>
   body, html {
     margin: 0; padding: 0; overflow: hidden; background: #111;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     user-select: none;
+    color: #0f0;
   }
   canvas {
     display: block;
@@ -17,69 +18,83 @@
   }
   #score, #timer, #powerup-timers {
     position: fixed;
-    font-size: 20px;
     font-weight: bold;
-    text-shadow: 0 0 5px;
-    user-select: none;
+    text-shadow: 0 0 5px #0f0;
+    font-family: monospace;
   }
   #score {
     top: 10px; left: 10px;
-    color: #0f0;
-    text-shadow: 0 0 5px #0f0;
+    font-size: 20px;
   }
   #timer {
     top: 10px; right: 10px;
-    color: #0ff;
-    text-shadow: 0 0 5px #0ff;
+    font-size: 20px;
   }
   #powerup-timers {
     bottom: 10px; left: 10px;
+    font-size: 16px;
     color: #ff0;
-    text-shadow: 0 0 5px #ff0;
   }
   #health-bar {
     position: fixed;
-    top: 40px; left: 10px;
+    bottom: 10px; right: 10px;
     width: 200px;
     height: 20px;
-    background: #333;
     border: 2px solid #0f0;
-    border-radius: 5px;
-    overflow: hidden;
+    background: #222;
+    box-shadow: 0 0 10px #0f0 inset;
   }
   #health-bar-inner {
     height: 100%;
-    background: #0f0;
     width: 100%;
-    transition: width 0.3s ease;
+    background: #0f0;
   }
-  /* Menus */
   #menu-overlay {
     position: fixed;
-    top:0; left:0; width:100%; height:100%;
+    top: 0; left: 0; right: 0; bottom: 0;
     background: rgba(0,0,0,0.85);
-    color: #0f0;
-    display: flex;
+    display: none;
     flex-direction: column;
-    justify-content: center;
     align-items: center;
+    justify-content: center;
+    color: #0f0;
     font-family: monospace;
-    font-size: 32px;
-    user-select: none;
+    z-index: 9999;
   }
-  #menu-overlay button {
-    margin-top: 20px;
-    font-size: 24px;
-    padding: 10px 20px;
+  #menu-text {
+    font-size: 48px;
+    margin-bottom: 40px;
+    text-align: center;
+  }
+  button {
+    font-family: monospace;
+    font-size: 20px;
+    margin: 10px;
+    padding: 10px 30px;
+    cursor: pointer;
     background: #0f0;
     border: none;
-    cursor: pointer;
+    border-radius: 6px;
+    box-shadow: 0 0 10px #0f0;
     color: #000;
-    border-radius: 5px;
-    transition: background 0.3s ease;
+    transition: background 0.3s;
   }
-  #menu-overlay button:hover {
+  button:hover {
+    background: #5f5;
+  }
+  #pause-btn {
+    position: fixed;
+    top: 10px; left: 50%;
+    transform: translateX(-50%);
     background: #0a0;
+    color: #fff;
+    font-weight: bold;
+    border-radius: 4px;
+    padding: 6px 12px;
+    cursor: pointer;
+    box-shadow: 0 0 15px #0a0;
+    user-select: none;
+    z-index: 1000;
   }
 </style>
 </head>
@@ -88,37 +103,44 @@
 <div id="timer">Time: 0s</div>
 <div id="powerup-timers"></div>
 <div id="health-bar"><div id="health-bar-inner"></div></div>
-<canvas id="game"></canvas>
+<button id="pause-btn" title="Pause (P)">Pause</button>
 
-<!-- Menus -->
 <div id="menu-overlay">
   <div id="menu-text">INSANE 2D ARCADE SHOOTER</div>
   <button id="start-btn">Start Game</button>
-  <button id="pause-btn" style="display:none;">Pause (P)</button>
-  <button id="resume-btn" style="display:none;">Resume</button>
-  <button id="restart-btn" style="display:none;">Restart</button>
+  <button id="resume-btn" style="display:none;">Resume Game</button>
+  <button id="restart-btn" style="display:none;">Restart Game</button>
 </div>
+
+<canvas id="game"></canvas>
 
 <script>
 (() => {
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
-  const W = window.innerWidth;
-  const H = window.innerHeight;
+  let W = window.innerWidth;
+  let H = window.innerHeight;
   canvas.width = W;
   canvas.height = H;
 
-  // Game state
+  // --- Game variables ---
   let score = 0;
   let gameOver = false;
   let paused = false;
-  let startTime = 0;
   let elapsedTime = 0;
   let lastFrameTime = 0;
+  let startTime = 0;
+  let shootCooldown = 0;
+  let lastEnemySpawn = 0;
+  let enemySpawnInterval = 1000;
+  let lastPowerupSpawn = 0;
+  let powerupSpawnInterval = 7000;
   let shakeDuration = 0;
   let shakeMagnitude = 10;
+  let bossSpawned = false;
+  let boss = null;
 
-  // Player object with health and powerups
+  // --- Player ---
   const player = {
     x: W / 2,
     y: H / 2,
@@ -127,56 +149,25 @@
     color: '#0f0',
     vx: 0,
     vy: 0,
-    health: 100,
     maxHealth: 100,
+    health: 100,
     powerups: {
-      speedBoost: 0, // frames remaining
-      shield: 0,
+      speedBoost: 0,
+      shield: 0
     }
   };
 
+  // --- Controls ---
   const keys = {};
   window.addEventListener('keydown', e => {
     keys[e.key.toLowerCase()] = true;
-    // Pause toggle (p)
-    if(e.key.toLowerCase() === 'p' && !gameOver && started) togglePause();
+    if(e.key.toLowerCase() === 'p') togglePause();
   });
   window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
 
-  // Bullets array
-  const bullets = [];
-
-  // Enemies array, with different types
-  const enemies = [];
-
-  // Particles array for explosions
-  const particles = [];
-
-  // Powerups array
-  const powerups = [];
-
-  // Timers and intervals
-  let enemySpawnInterval = 1000;
-  let lastEnemySpawn = 0;
-
-  let powerupSpawnInterval = 7000;
-  let lastPowerupSpawn = 0;
-
-  // Boss related
-  let bossSpawned = false;
-  let boss = null;
-  const bossSpawnTime = 60000; // 1 minute after start
-
-  // Utility random number
-  function randRange(min, max) {
-    return Math.random() * (max - min) + min;
-  }
-
-  // Shooting cooldown
-  let shootCooldown = 0;
-
-  // Mouse pos
-  let mouseX = W / 2, mouseY = H / 2;
+  // --- Mouse ---
+  let mouseX = W / 2;
+  let mouseY = H / 2;
   window.addEventListener('mousemove', e => {
     mouseX = e.clientX;
     mouseY = e.clientY;
@@ -184,25 +175,44 @@
   window.addEventListener('mousedown', e => keys['mouse'] = true);
   window.addEventListener('mouseup', e => keys['mouse'] = false);
 
-  // Sounds
+  // --- Bullets ---
+  const bullets = [];
+
+  // --- Enemies ---
+  const enemies = [];
+
+  // --- Particles ---
+  const particles = [];
+
+  // --- Powerups ---
+  const powerups = [];
+
+  // --- Sounds ---
   const sounds = {
-    shoot: new Audio('https://freesound.org/data/previews/341/341695_6245762-lq.mp3'), // laser
-    explosion: new Audio('https://freesound.org/data/previews/235/235968_3980957-lq.mp3'), // explosion
-    powerup: new Audio('https://freesound.org/data/previews/331/331912_3248244-lq.mp3'), // powerup pickup
-    damage: new Audio('https://freesound.org/data/previews/198/198844_2859976-lq.mp3'), // damage taken
-    bossRoar: new Audio('https://freesound.org/data/previews/331/331912_3248244-lq.mp3'), // reuse powerup for boss roar placeholder
+    shoot: new Audio('https://freesound.org/data/previews/320/320181_5260879-lq.mp3'),
+    explosion: new Audio('https://freesound.org/data/previews/331/331912_3248244-lq.mp3'),
+    damage: new Audio('https://freesound.org/data/previews/256/256113_3263906-lq.mp3'),
+    powerup: new Audio('https://freesound.org/data/previews/331/331912_3248244-lq.mp3'),
+    bossRoar: new Audio('https://freesound.org/data/previews/457/457034_5121236-lq.mp3')
   };
 
-  // Preload sounds volume settings
-  for (const s of Object.values(sounds)) s.volume = 0.3;
+  // --- Utility ---
+  function randRange(min, max) {
+    return Math.random() * (max - min) + min;
+  }
 
-  // Player shooting
+  // --- Player shoot ---
   function shoot() {
+    if (gameOver || paused) return;
+    sounds.shoot.currentTime = 0;
+    sounds.shoot.play();
+
     let dx = mouseX - player.x;
     let dy = mouseY - player.y;
     let dist = Math.sqrt(dx*dx + dy*dy);
     dx /= dist;
     dy /= dist;
+
     bullets.push({
       x: player.x + dx * player.radius,
       y: player.y + dy * player.radius,
@@ -211,78 +221,103 @@
       radius: 5,
       color: '#0ff',
     });
-    sounds.shoot.currentTime = 0;
-    sounds.shoot.play();
   }
 
-  // Classes for enemies & boss
+  // --- Update player ---
+  function updatePlayer() {
+    player.vx = 0;
+    player.vy = 0;
+    let currentSpeed = player.speed;
+    if(player.powerups.speedBoost > 0) currentSpeed *= 1.5;
+
+    if (keys['w'] || keys['arrowup']) player.vy = -currentSpeed;
+    if (keys['s'] || keys['arrowdown']) player.vy = currentSpeed;
+    if (keys['a'] || keys['arrowleft']) player.vx = -currentSpeed;
+    if (keys['d'] || keys['arrowright']) player.vx = currentSpeed;
+
+    player.x += player.vx;
+    player.y += player.vy;
+
+    player.x = Math.min(Math.max(player.radius, player.x), W - player.radius);
+    player.y = Math.min(Math.max(player.radius, player.y), H - player.radius);
+
+    if ((keys[' '] || keys['enter'] || keys['mouse']) && shootCooldown <= 0) {
+      shoot();
+      shootCooldown = 10;
+    }
+
+    if(player.powerups.speedBoost > 0) player.powerups.speedBoost--;
+    if(player.powerups.shield > 0) player.powerups.shield--;
+  }
+
+  // --- Player damage ---
+  function damagePlayer(amount) {
+    if(player.powerups.shield > 0) return; // shield blocks damage
+    player.health -= amount;
+    sounds.damage.currentTime = 0;
+    sounds.damage.play();
+    shakeDuration = 15;
+    if(player.health <= 0) {
+      player.health = 0;
+      gameOver = true;
+      showGameOverMenu();
+    }
+  }
+
+  // --- Spawn enemy ---
+  function spawnEnemy(type = 'normal') {
+    const side = Math.floor(randRange(0, 4));
+    let x, y;
+    if(side === 0) { x = randRange(0, W); y = -30; }
+    else if(side === 1) { x = W + 30; y = randRange(0, H); }
+    else if(side === 2) { x = randRange(0, W); y = H + 30; }
+    else { x = -30; y = randRange(0, H); }
+
+    if(type === 'normal') {
+      enemies.push(new Enemy(x, y, randRange(15,25), randRange(1,3), '#f00', 1));
+    } else if(type === 'fast') {
+      enemies.push(new Enemy(x, y, 15, randRange(3,5), '#f80', 1));
+    }
+  }
+
+  // --- Enemy class ---
   class Enemy {
-    constructor(x,y,type='normal'){
+    constructor(x, y, radius, speed, color, health=1, isBoss=false) {
       this.x = x;
       this.y = y;
-      this.type = type;
-      this.radius = type === 'boss' ? 70 : randRange(15,25);
-      this.speed = type === 'boss' ? 1.2 : randRange(1,2);
-      this.color = type === 'boss' ? '#f55' : ['#f00','#f80','#ff0','#0f0','#0ff','#08f','#f0f'][Math.floor(randRange(0,7))];
-      this.health = type === 'boss' ? 150 : 1;
-      this.maxHealth = this.health;
-      this.hitCooldown = 0;
+      this.radius = radius;
+      this.speed = speed;
+      this.color = color;
+      this.health = health;
+      this.isBoss = isBoss;
+      this.maxHealth = health;
+      this.damage = isBoss ? 30 : 10;
     }
+
     update() {
       let dx = player.x - this.x;
       let dy = player.y - this.y;
       let dist = Math.sqrt(dx*dx + dy*dy);
       dx /= dist;
       dy /= dist;
-
-      // Boss moves slower but with more health
-      this.speed += 0.0005; // slowly speeds up over time
-
       this.x += dx * this.speed;
       this.y += dy * this.speed;
 
-      if(this.hitCooldown > 0) this.hitCooldown--;
-
-      // Check collision with player
+      // Collide with player
       if(dist < this.radius + player.radius) {
-        if(player.powerups.shield > 0) {
-          // Shield blocks damage but boss takes damage
-          if(this.hitCooldown === 0) {
-            this.health--;
-            this.hitCooldown = 30; // invincibility frames for boss
-            createExplosion(this.x, this.y, this.color);
-            if(this.health <= 0) {
-              score += 100;
-              createExplosion(this.x, this.y, this.color);
-              enemies.splice(enemies.indexOf(this), 1);
-              boss = null;
-              bossSpawned = false;
-            }
-          }
-        } else {
-          playerTakeDamage(20);
-          // Boss does not die on player collision here
-        }
+        createExplosion(this.x, this.y, this.color);
+        enemies.splice(enemies.indexOf(this), 1);
+        damagePlayer(this.damage);
       }
     }
+
     draw(ctx) {
       ctx.fillStyle = this.color;
       ctx.beginPath();
       ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
       ctx.fill();
 
-      // Boss health bar above it
-      if(this.type === 'boss') {
-        const barWidth = this.radius * 2;
-        const barHeight = 10;
-        const healthPercent = this.health / this.maxHealth;
-        ctx.fillStyle = '#000';
-        ctx.fillRect(this.x - this.radius, this.y - this.radius - 20, barWidth, barHeight);
-        ctx.fillStyle = `rgb(${(1-healthPercent)*255},${healthPercent*255},0)`;
-        ctx.fillRect(this.x - this.radius, this.y - this.radius - 20, barWidth * healthPercent, barHeight);
-      }
-
-      // Eyes for normal enemies & boss
+      // Eyes
       ctx.fillStyle = 'white';
       ctx.beginPath();
       ctx.arc(this.x - this.radius/3, this.y - this.radius/3, this.radius/5, 0, Math.PI*2);
@@ -293,53 +328,66 @@
       ctx.arc(this.x - this.radius/3, this.y - this.radius/3, this.radius/10, 0, Math.PI*2);
       ctx.arc(this.x + this.radius/3, this.y - this.radius/3, this.radius/10, 0, Math.PI*2);
       ctx.fill();
+
+      // Boss health bar
+      if(this.isBoss) {
+        ctx.fillStyle = '#222';
+        ctx.fillRect(this.x - this.radius, this.y - this.radius - 20, this.radius * 2, 10);
+        ctx.fillStyle = '#f00';
+        const hpWidth = (this.health / this.maxHealth) * this.radius * 2;
+        ctx.fillRect(this.x - this.radius, this.y - this.radius - 20, hpWidth, 10);
+      }
     }
   }
 
-  // Powerup class
-  class Powerup {
-    constructor(x, y, type){
-      this.x = x;
-      this.y = y;
-      this.radius = 15;
-      this.type = type;
-      this.color = {
-        health: '#f55',
-        speed: '#5af',
-        shield: '#ff5',
-      }[type];
-      this.alpha = 1;
-    }
-    draw(ctx) {
-      ctx.save();
-      ctx.globalAlpha = this.alpha;
-      ctx.fillStyle = this.color;
-      ctx.beginPath();
-      ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
-      ctx.fill();
-      ctx.fillStyle = '#000';
-      ctx.font = '20px monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      const symbol = {
-        health: '+',
-        speed: 'S',
-        shield: 'D'
-      }[this.type];
-      ctx.fillText(symbol, this.x, this.y + 1);
-      ctx.restore();
+  // --- Bullets update ---
+  function updateBullets() {
+    for(let i = bullets.length - 1; i >= 0; i--) {
+      const b = bullets[i];
+      b.x += b.vx;
+      b.y += b.vy;
+
+      if(b.x < 0 || b.x > W || b.y < 0 || b.y > H) {
+        bullets.splice(i, 1);
+        continue;
+      }
+
+      // Check enemy collision
+      for(let j = enemies.length - 1; j >= 0; j--) {
+        const e = enemies[j];
+        const dist = Math.hypot(e.x - b.x, e.y - b.y);
+        if(dist < e.radius + b.radius) {
+          e.health--;
+          if(e.health <= 0) {
+            createExplosion(e.x, e.y, e.color);
+            sounds.explosion.currentTime = 0;
+            sounds.explosion.play();
+
+            if(e.isBoss) {
+              bossSpawned = false;
+              boss = null;
+            }
+
+            enemies.splice(j, 1);
+            score += e.isBoss ? 100 : 10;
+          }
+          bullets.splice(i, 1);
+          updateUI();
+          break;
+        }
+      }
     }
   }
 
-  // Particles for explosions
+  // --- Particle class ---
   class Particle {
-    constructor(x,y,color){
+    constructor(x, y, color) {
       this.x = x;
       this.y = y;
-      this.vx = randRange(-5,5);
-      this.vy = randRange(-5,5);
+      this.vx = randRange(-5, 5);
+      this.vy = randRange(-5, 5);
       this.alpha = 1;
-      this.size = randRange(2,5);
+      this.size = randRange(2, 5);
       this.color = color;
       this.life = 30;
     }
@@ -355,183 +403,92 @@
       ctx.globalAlpha = this.alpha;
       ctx.fillStyle = this.color;
       ctx.beginPath();
-      ctx.arc(this.x,this.y,this.size,0,Math.PI*2);
+      ctx.arc(this.x, this.y, this.size, 0, Math.PI*2);
       ctx.fill();
       ctx.restore();
     }
   }
 
-  // Functions
-
-  function createExplosion(x,y,color){
-    sounds.explosion.currentTime = 0;
-    sounds.explosion.play();
-    for(let i=0; i<30; i++){
-      particles.push(new Particle(x,y,color));
+  // --- Create explosion ---
+  function createExplosion(x, y, color) {
+    for(let i = 0; i < 30; i++) {
+      particles.push(new Particle(x, y, color));
     }
   }
 
-  function playerTakeDamage(amount) {
-    if(player.powerups.shield > 0) return; // no damage if shield active
-    player.health -= amount;
-    if(player.health < 0) player.health = 0;
-    shakeDuration = 15; // start screen shake
-    sounds.damage.currentTime = 0;
-    sounds.damage.play();
-    if(player.health === 0) {
-      gameOver = true;
-      showGameOverMenu();
+  // --- Update particles ---
+  function updateParticles() {
+    for(let i = particles.length - 1; i >= 0; i--) {
+      particles[i].update();
+      if(particles[i].alpha <= 0) particles.splice(i, 1);
     }
   }
 
-  // Spawn enemy at random edge
-  function spawnEnemy(type='normal') {
-    const side = Math.floor(randRange(0,4));
-    let x,y;
-    if(side === 0) { x = randRange(0,W); y = -30; }
-    else if(side === 1) { x = W+30; y = randRange(0,H); }
-    else if(side === 2) { x = randRange(0,W); y = H+30; }
-    else { x = -30; y = randRange(0,H); }
-
-    enemies.push(new Enemy(x,y,type));
+  // --- Powerup class ---
+  class Powerup {
+    constructor(x, y, type) {
+      this.x = x;
+      this.y = y;
+      this.radius = 12;
+      this.type = type;
+      this.color = type === 'health' ? '#0f0' :
+                   type === 'speed' ? '#ff0' :
+                   '#0ff'; // shield
+    }
+    draw(ctx) {
+      ctx.fillStyle = this.color;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#000';
+      ctx.font = '12px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(this.type[0].toUpperCase(), this.x, this.y);
+    }
   }
 
-  // Spawn powerup randomly on map
+  // --- Spawn powerup ---
   function spawnPowerup() {
     const x = randRange(50, W - 50);
     const y = randRange(50, H - 50);
-    const types = ['health','speed','shield'];
+    const types = ['health', 'speed', 'shield'];
     const type = types[Math.floor(randRange(0, types.length))];
-    powerups.push(new Powerup(x,y,type));
+    powerups.push(new Powerup(x, y, type));
   }
 
-  // Apply powerup effects to player
-  function applyPowerup(type) {
-    sounds.powerup.currentTime = 0;
-    sounds.powerup.play();
-    if(type === 'health') {
-      player.health = Math.min(player.health + 30, player.maxHealth);
-    } else if(type === 'speed') {
-      player.powerups.speedBoost = 300; // 5 seconds
-    } else if(type === 'shield') {
-      player.powerups.shield = 300;
-    }
-  }
-
-  // Update bullets & collision
-  function updateBullets() {
-    for(let i = bullets.length-1; i>=0; i--) {
-      const b = bullets[i];
-      b.x += b.vx;
-      b.y += b.vy;
-      if(b.x < 0 || b.x > W || b.y < 0 || b.y > H) {
-        bullets.splice(i, 1);
-        continue;
-      }
-      // Check collision with enemies
-      for(let j = enemies.length-1; j>=0; j--) {
-        const e = enemies[j];
-        const dist = Math.hypot(e.x - b.x, e.y - b.y);
-        if(dist < e.radius + b.radius) {
-          createExplosion(e.x, e.y, e.color);
-          bullets.splice(i,1);
-
-          if(e.type === 'boss'){
-            e.health--;
-            if(e.health <= 0) {
-              score += 100;
-              enemies.splice(j,1);
-              boss = null;
-              bossSpawned = false;
-            }
-          } else {
-            score += 10;
-            enemies.splice(j,1);
-          }
-          break;
-        }
-      }
-    }
-  }
-
-  // Update enemies (move, collide with player)
-  function updateEnemies(timestamp) {
-    // Spawn normal enemies faster over time
-    if(timestamp - lastEnemySpawn > enemySpawnInterval) {
-      if(!bossSpawned && elapsedTime > bossSpawnTime) {
-        spawnEnemy('boss');
-        bossSpawned = true;
-        boss = enemies[enemies.length-1];
-        sounds.bossRoar.currentTime = 0;
-        sounds.bossRoar.play();
-      } else if(!bossSpawned) {
-        spawnEnemy('normal');
-      }
-      lastEnemySpawn = timestamp;
-      if(enemySpawnInterval > 400) enemySpawnInterval -= 8;
-    }
-
-    enemies.forEach(e => e.update());
-  }
-
-  // Update powerups (spawn & check pickup)
+  // --- Update powerups ---
   function updatePowerups(timestamp) {
     if(timestamp - lastPowerupSpawn > powerupSpawnInterval) {
       spawnPowerup();
       lastPowerupSpawn = timestamp;
     }
 
-    for(let i = powerups.length-1; i >= 0; i--) {
+    for(let i = powerups.length - 1; i >= 0; i--) {
       const p = powerups[i];
       const dist = Math.hypot(player.x - p.x, player.y - p.y);
       if(dist < player.radius + p.radius) {
         applyPowerup(p.type);
         powerups.splice(i, 1);
+        sounds.powerup.currentTime = 0;
+        sounds.powerup.play();
       }
     }
   }
 
-  // Update particles
-  function updateParticles() {
-    for(let i=particles.length-1; i>=0; i--) {
-      particles[i].update();
-      if(particles[i].alpha <= 0) particles.splice(i,1);
+  // --- Apply powerup ---
+  function applyPowerup(type) {
+    if(type === 'health') {
+      player.health = Math.min(player.maxHealth, player.health + 30);
+    } else if(type === 'speed') {
+      player.powerups.speedBoost = 600; // 10 seconds (assuming 60fps)
+    } else if(type === 'shield') {
+      player.powerups.shield = 600;
     }
   }
 
-  // Update player movement and shooting
-  function updatePlayer() {
-    player.vx = 0;
-    player.vy = 0;
-    let currentSpeed = player.speed;
-    if(player.powerups.speedBoost > 0) currentSpeed *= 1.5;
-
-    if (keys['w'] || keys['arrowup']) player.vy = -currentSpeed;
-    if (keys['s'] || keys['arrowdown']) player.vy = currentSpeed;
-    if (keys['a'] || keys['arrowleft']) player.vx = -currentSpeed;
-    if (keys['d'] || keys['arrowright']) player.vx = currentSpeed;
-
-    player.x += player.vx;
-    player.y += player.vy;
-
-    // Clamp inside screen
-    player.x = Math.min(Math.max(player.radius, player.x), W - player.radius);
-    player.y = Math.min(Math.max(player.radius, player.y), H - player.radius);
-
-    // Shooting (space, enter, mouse)
-    if ((keys[' '] || keys['enter'] || keys['mouse']) && shootCooldown <= 0) {
-      shoot();
-      shootCooldown = 10;
-    }
-
-    // Reduce powerup timers
-    if(player.powerups.speedBoost > 0) player.powerups.speedBoost--;
-    if(player.powerups.shield > 0) player.powerups.shield--;
-  }
-
-  // Draw player and shield
+  // --- Draw player & shield ---
   function drawPlayer() {
-    // Shield circle
     if(player.powerups.shield > 0) {
       ctx.save();
       ctx.strokeStyle = '#ff5';
@@ -539,234 +496,240 @@
       ctx.shadowColor = '#ff5';
       ctx.shadowBlur = 10;
       ctx.beginPath();
-      ctx.arc(player.x, player.y, player.radius + 10, 0, Math.PI*2);
+      ctx.arc(player.x, player.y, player.radius + 10, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
     }
 
     ctx.fillStyle = player.color;
     ctx.beginPath();
-    ctx.arc(player.x, player.y, player.radius, 0, Math.PI*2);
+    ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  // Draw enemies
-  function drawEnemies() {
-    enemies.forEach(e => e.draw(ctx));
-  }
-
-  // Draw bullets
-  function drawBullets() {
-    bullets.forEach(b => {
-      ctx.fillStyle = b.color;
-      ctx.beginPath();
-      ctx.arc(b.x, b.y, b.radius, 0, Math.PI*2);
-      ctx.fill();
-    });
-  }
-
-  // Draw powerups
-  function drawPowerups() {
-    powerups.forEach(p => p.draw(ctx));
-  }
-
-  // Draw particles
-  function drawParticles() {
-    particles.forEach(p => p.draw(ctx));
-  }
-
-  // Update score and health bar UI
-  function updateUI() {
-    document.getElementById('score').innerText = `Score: ${score}`;
-    document.getElementById('timer').innerText = `Time: ${Math.floor(elapsedTime/1000)}s`;
-
-    // Health bar width & color
-    const hpPercent = player.health / player.maxHealth;
-    const healthBarInner = document.getElementById('health-bar-inner');
-    healthBarInner.style.width = `${hpPercent*100}%`;
-    // Color from green to red
-    healthBarInner.style.background = `rgb(${(1 - hpPercent) * 255}, ${hpPercent * 255}, 0)`;
-
-    // Powerup timers display
-    const timersDiv = document.getElementById('powerup-timers');
-    let texts = [];
-    if(player.powerups.speedBoost > 0) texts.push(`Speed Boost: ${(player.powerups.speedBoost/60).toFixed(1)}s`);
-    if(player.powerups.shield > 0) texts.push(`Shield: ${(player.powerups.shield/60).toFixed(1)}s`);
-    timersDiv.innerText = texts.join(' | ');
-  }
-
-  // Screen shake effect
+  // --- Screen shake ---
   function applyScreenShake() {
     if(shakeDuration > 0) {
       const dx = (Math.random() - 0.5) * shakeMagnitude;
       const dy = (Math.random() - 0.5) * shakeMagnitude;
-      ctx.setTransform(1, 0, 0, 1, dx, dy);
+      ctx.translate(dx, dy);
       shakeDuration--;
-    } else {
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
     }
   }
 
-  // Draw game over screen
-  function drawGameOver() {
-    ctx.fillStyle = 'rgba(0,0,0,0.85)';
-    ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = 'red';
-    ctx.font = '72px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('GAME OVER', W/2, H/2);
-    ctx.font = '36px monospace';
-    ctx.fillText(`Final Score: ${score}`, W/2, H/2 + 60);
-    ctx.fillText(`Time Survived: ${Math.floor(elapsedTime/1000)}s`, W/2, H/2 + 110);
+  // --- Draw all ---
+  function drawAll() {
+    applyScreenShake();
+
+    // Player
+    drawPlayer();
+
+    // Bullets
+    for(const b of bullets) {
+      ctx.fillStyle = b.color;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Enemies
+    for(const e of enemies) {
+      e.draw(ctx);
+    }
+
+    // Powerups
+    for(const p of powerups) {
+      p.draw(ctx);
+    }
+
+    // Particles
+    for(const p of particles) {
+      p.draw(ctx);
+    }
   }
 
-  // Draw start menu
+  // --- Update enemies ---
+  function updateEnemies(timestamp) {
+    // Spawn enemies faster over time
+    if(timestamp - lastEnemySpawn > enemySpawnInterval) {
+      if(!bossSpawned && score >= 200) {
+        spawnBoss();
+      } else if (!bossSpawned) {
+        // Randomly spawn normal or fast enemy
+        const enemyType = Math.random() < 0.7 ? 'normal' : 'fast';
+        spawnEnemy(enemyType);
+      }
+      lastEnemySpawn = timestamp;
+      if(enemySpawnInterval > 400) enemySpawnInterval -= 2;
+    }
+
+    // Update all enemies
+    for(let i = enemies.length - 1; i >= 0; i--) {
+      const e = enemies[i];
+      e.update();
+    }
+  }
+
+  // --- Spawn boss ---
+  function spawnBoss() {
+    bossSpawned = true;
+    boss = new Enemy(W/2, -100, 80, 1.5, '#800080', 30, true);
+    enemies.push(boss);
+    sounds.bossRoar.currentTime = 0;
+    sounds.bossRoar.play();
+  }
+
+  // --- Update UI ---
+  function updateUI() {
+    document.getElementById('score').innerText = `Score: ${score}`;
+    document.getElementById('timer').innerText = `Time: ${Math.floor(elapsedTime/1000)}s`;
+
+    // Health bar
+    const healthBarInner = document.getElementById('health-bar-inner');
+    const healthPercent = (player.health / player.maxHealth) * 100;
+    healthBarInner.style.width = healthPercent + '%';
+    healthBarInner.style.backgroundColor = healthPercent > 50 ? '#0f0' : (healthPercent > 20 ? '#ff0' : '#f00');
+
+    // Powerup timers text
+    const timers = [];
+    if(player.powerups.speedBoost > 0) timers.push(`Speed: ${(player.powerups.speedBoost/60).toFixed(1)}s`);
+    if(player.powerups.shield > 0) timers.push(`Shield: ${(player.powerups.shield/60).toFixed(1)}s`);
+    document.getElementById('powerup-timers').innerText = timers.join(' | ');
+  }
+
+  // --- Draw game over screen ---
+  function drawGameOverScreen() {
+    const overlay = document.getElementById('menu-overlay');
+    overlay.style.display = 'flex';
+    document.getElementById('menu-text').innerText = 'GAME OVER';
+    document.getElementById('start-btn').style.display = 'none';
+    document.getElementById('resume-btn').style.display = 'none';
+    document.getElementById('restart-btn').style.display = 'inline-block';
+  }
+
+  // --- Show menus ---
   const menuOverlay = document.getElementById('menu-overlay');
   const startBtn = document.getElementById('start-btn');
-  const pauseBtn = document.getElementById('pause-btn');
   const resumeBtn = document.getElementById('resume-btn');
   const restartBtn = document.getElementById('restart-btn');
-  const menuText = document.getElementById('menu-text');
-
-  let started = false;
+  const pauseBtn = document.getElementById('pause-btn');
 
   function showStartMenu() {
     menuOverlay.style.display = 'flex';
+    document.getElementById('menu-text').innerText = 'INSANE 2D ARCADE SHOOTER';
     startBtn.style.display = 'inline-block';
-    pauseBtn.style.display = 'none';
     resumeBtn.style.display = 'none';
     restartBtn.style.display = 'none';
-    menuText.innerText = 'INSANE 2D ARCADE SHOOTER';
   }
-
   function showPauseMenu() {
     menuOverlay.style.display = 'flex';
+    document.getElementById('menu-text').innerText = 'PAUSED';
     startBtn.style.display = 'none';
-    pauseBtn.style.display = 'none';
     resumeBtn.style.display = 'inline-block';
-    restartBtn.style.display = 'inline-block';
-    menuText.innerText = 'PAUSED';
+    restartBtn.style.display = 'none';
   }
-
   function showGameOverMenu() {
     menuOverlay.style.display = 'flex';
+    document.getElementById('menu-text').innerText = 'GAME OVER';
     startBtn.style.display = 'none';
-    pauseBtn.style.display = 'none';
     resumeBtn.style.display = 'none';
     restartBtn.style.display = 'inline-block';
-    menuText.innerText = 'GAME OVER';
+  }
+  function hideMenus() {
+    menuOverlay.style.display = 'none';
   }
 
   startBtn.onclick = () => {
     startGame();
+    hideMenus();
   };
-
+  resumeBtn.onclick = () => {
+    paused = false;
+    hideMenus();
+  };
+  restartBtn.onclick = () => {
+    startGame();
+    hideMenus();
+  };
   pauseBtn.onclick = () => {
     togglePause();
   };
 
-  resumeBtn.onclick = () => {
-    togglePause();
-  };
-
-  restartBtn.onclick = () => {
-    resetGame();
-  };
-
+  // --- Pause toggle ---
   function togglePause() {
     if(gameOver) return;
     paused = !paused;
-    if(paused) {
-      showPauseMenu();
-    } else {
-      menuOverlay.style.display = 'none';
-      lastFrameTime = performance.now();
-      requestAnimationFrame(gameLoop);
-    }
+    if(paused) showPauseMenu();
+    else hideMenus();
   }
 
-  // Reset game state to initial
-  function resetGame() {
+  // --- Reset game ---
+  function startGame() {
     score = 0;
     gameOver = false;
     paused = false;
+    elapsedTime = 0;
+    startTime = performance.now();
+    shootCooldown = 0;
+    lastEnemySpawn = 0;
+    enemySpawnInterval = 1000;
+    lastPowerupSpawn = 0;
+    powerupSpawnInterval = 7000;
+    shakeDuration = 0;
+    bossSpawned = false;
+    boss = null;
+
     player.x = W / 2;
     player.y = H / 2;
     player.health = player.maxHealth;
     player.powerups.speedBoost = 0;
     player.powerups.shield = 0;
+
     bullets.length = 0;
     enemies.length = 0;
     particles.length = 0;
     powerups.length = 0;
-    enemySpawnInterval = 1000;
-    lastEnemySpawn = 0;
-    lastPowerupSpawn = 0;
-    bossSpawned = false;
-    boss = null;
-    elapsedTime = 0;
-    startTime = performance.now();
-    menuOverlay.style.display = 'none';
-    shootCooldown = 0;
-    started = true;
-    lastFrameTime = performance.now();
-    requestAnimationFrame(gameLoop);
   }
 
-  function startGame() {
-    resetGame();
-    pauseBtn.style.display = 'inline-block';
-  }
-
-  // Main game loop
+  // --- Game loop ---
   function gameLoop(timestamp = 0) {
-    if(!started) return;
+    if(!startTime) startTime = timestamp;
     if(paused || gameOver) {
-      if(gameOver) drawGameOver();
+      updateUI();
+      requestAnimationFrame(gameLoop);
       return;
     }
-    if(!lastFrameTime) lastFrameTime = timestamp;
-    const delta = timestamp - lastFrameTime;
-    elapsedTime += delta;
-    lastFrameTime = timestamp;
+    elapsedTime = timestamp - startTime;
 
-    // Clear canvas
     ctx.clearRect(0, 0, W, H);
 
-    // Apply screen shake if any
-    applyScreenShake();
-
-    // Update game entities
     updatePlayer();
     updateBullets();
     updateEnemies(timestamp);
     updatePowerups(timestamp);
     updateParticles();
 
-    // Draw entities
-    drawPlayer();
-    drawBullets();
-    drawEnemies();
-    drawPowerups();
-    drawParticles();
+    drawAll();
 
-    // Draw UI
-    updateUI();
-
-    // Shoot cooldown decrement
     shootCooldown = Math.max(0, shootCooldown - 1);
+
+    updateUI();
 
     requestAnimationFrame(gameLoop);
   }
 
-  // Initial show start menu
-  showStartMenu();
-
-  // Resize canvas on window resize
+  // --- Window resize ---
   window.addEventListener('resize', () => {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W;
+    canvas.height = H;
   });
+
+  // --- Init ---
+  showStartMenu();
+  updateUI();
+  requestAnimationFrame(gameLoop);
 })();
 </script>
 </body>
