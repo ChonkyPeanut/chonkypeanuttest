@@ -1,314 +1,221 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>2D Sandbox Game</title>
-  <style>
-    body {
-      margin: 0;
-      background: black;
-      overflow: hidden;
-    }
-    canvas {
-      display: block;
-      margin: 0 auto;
-      background: #000;
-    }
-  </style>
-</head>
-<body>
-<canvas id="gameCanvas" width="800" height="900"></canvas>
+// === game.js: Final 2D Minecraft-Inspired Version ===
 
-<script>
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
+canvas.width = 800;
+canvas.height = 900;
 
-const gridSize = 50;
-const gridCols = 16;
-const gridRows = 16;
-const blockWidth = 50;
-const blockHeight = 50;
-const hotbarY = 800;
-const blocks = [];
-const gridMap = {};
-const particles = [];
-let mouse = { x: 0, y: 0 };
+// === Constants ===
+const TILE_SIZE = 50;
+const GRID_WIDTH = 16;
+const GRID_HEIGHT = 16;
+const WORLD = [];
+const DAMAGE_THRESHOLD = {
+  "stone": 10,
+  "dirt": 5
+};
 
-// Player
-let player = {
+// === Tools/Items ===
+const HOTBAR = ["block", "shovel", null, null, null, null, null, null];
+let selectedItem = 1; // Shovel
+
+// === Player ===
+const player = {
   x: 400,
   y: 600,
   width: 50,
   height: 50,
   color: "lime",
-  speed: 4,
+  vx: 0,
   vy: 0,
-  gravity: 0.5,
+  gravity: 0.6,
+  speed: 4,
+  jumpStrength: -12,
   grounded: false,
-  jumpStrength: -10,
   health: 100,
-  maxHealth: 100,
-  miningTarget: null,
-  miningProgress: 0
+  maxHealth: 100
 };
 
-// Keys
-const keys = { w: false, a: false, s: false, d: false };
-let jumpBuffer = 0;
-const jumpBufferLimit = 10;
+// === Mouse + Keys ===
+let mouseX = 0;
+let mouseY = 0;
+const keys = {};
 
-// Block mining strength
-const miningStrength = {
-  brown: 5,
-  grey: 10
-};
-
-// Helper
-function getGridKey(x, y) {
-  return `${x},${y}`;
-}
-
-function addBlock(x, y, type) {
-  const key = getGridKey(x, y);
-  if (!gridMap[key]) {
-    let color = type === "brown" ? "#caa472" : "#ccc";
-    let ores = "";
-    if (type === "brown" && y < 500 && y >= 300) {
-      const r = Math.random();
-      if (r < 0.1) ores = "black";
-      else if (r < 0.15) ores = "gold";
-      else if (r < 0.2) ores = "silver";
-    }
-
-    gridMap[key] = {
-      x, y,
-      type,
-      color,
-      damage: 0,
-      ores
-    };
-  }
-}
-
-// Generate terrain
-for (let y = 0; y < 800; y += 50) {
-  if (y >= 300 && y <= 500) {
-    if (Math.random() < 0.25) {
-      for (let x = 0; x < 800; x += 50) {
-        if (Math.random() < 0.4) addBlock(x, y, "brown");
-      }
-    }
-  }
-  if (y < 300) {
-    for (let x = 0; x < 800; x += 50) {
-      if (Math.random() < 0.5) addBlock(x, y, "grey");
+// === Map Generation ===
+for (let y = 0; y < GRID_HEIGHT; y++) {
+  WORLD[y] = [];
+  for (let x = 0; x < GRID_WIDTH; x++) {
+    if (y >= 6) {
+      // y=300 to 500: dirt with ore chance
+      const oreChance = Math.random();
+      let ore = null;
+      if (oreChance < 0.05) ore = "gold";
+      else if (oreChance < 0.10) ore = "silver";
+      else if (oreChance < 0.15) ore = "coal";
+      WORLD[y][x] = { type: "dirt", hp: DAMAGE_THRESHOLD.dirt, ore };
+    } else if (y >= 0 && y < 6) {
+      // Below y=300: stone
+      WORLD[y][x] = { type: "stone", hp: DAMAGE_THRESHOLD.stone };
+    } else {
+      WORLD[y][x] = null;
     }
   }
 }
 
-// Particle effect
-class Particle {
-  constructor(x, y, color) {
-    this.x = x + 25;
-    this.y = y + 25;
-    this.vx = (Math.random() - 0.5) * 4;
-    this.vy = (Math.random() - 0.5) * 4;
-    this.alpha = 1;
-    this.color = color;
-  }
-  update() {
-    this.x += this.vx;
-    this.y += this.vy;
-    this.vy += 0.1;
-    this.alpha -= 0.03;
-  }
-  draw() {
-    ctx.globalAlpha = this.alpha;
-    ctx.fillStyle = this.color;
-    ctx.beginPath();
-    ctx.arc(this.x, this.y, 3, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha = 1;
-  }
-}
-
-// Input listeners
-document.addEventListener("keydown", (e) => {
-  if (keys.hasOwnProperty(e.key)) keys[e.key] = true;
-  if (e.key === "w") jumpBuffer = jumpBufferLimit;
-});
-document.addEventListener("keyup", (e) => {
-  if (keys.hasOwnProperty(e.key)) keys[e.key] = false;
-});
-
-canvas.addEventListener("mousemove", (e) => {
+// === Event Listeners ===
+document.addEventListener("keydown", e => keys[e.key] = true);
+document.addEventListener("keyup", e => keys[e.key] = false);
+canvas.addEventListener("mousemove", e => {
   const rect = canvas.getBoundingClientRect();
-  mouse.x = e.clientX - rect.left;
-  mouse.y = 900 - (e.clientY - rect.top); // Invert y
+  mouseX = e.clientX - rect.left;
+  mouseY = e.clientY - rect.top;
 });
+canvas.addEventListener("mousedown", e => {
+  const gridX = Math.floor(mouseX / TILE_SIZE);
+  const gridY = GRID_HEIGHT - 1 - Math.floor((mouseY - 100) / TILE_SIZE);
 
-document.addEventListener("keydown", (e) => {
-  const px = Math.floor((player.x + 25) / 50) * 50;
-  const py = Math.floor((player.y + 25) / 50) * 50;
-  const mouseGridX = Math.floor(mouse.x / 50) * 50;
-  const mouseGridY = Math.floor(mouse.y / 50) * 50;
-  const key = getGridKey(mouseGridX, mouseGridY);
+  if (gridX >= 0 && gridX < GRID_WIDTH && gridY >= 0 && gridY < GRID_HEIGHT) {
+    const dx = gridX - Math.floor((player.x + player.width / 2) / TILE_SIZE);
+    const dy = gridY - Math.floor((player.y + player.height / 2) / TILE_SIZE);
+    const isInReach = Math.abs(dx) <= 1 && Math.abs(dy) <= 1;
 
-  const inRange = Math.abs(mouseGridX - px) <= 50 && Math.abs(mouseGridY - py) <= 50;
+    const block = WORLD[gridY][gridX];
 
-  if (e.key === "1" && inRange && !gridMap[key]) {
-    // Let it fall if no block below
-    let yFall = mouseGridY;
-    while (yFall > 0) {
-      const belowKey = getGridKey(mouseGridX, yFall - 50);
-      if (gridMap[belowKey]) break;
-      yFall -= 50;
-    }
-    addBlock(mouseGridX, yFall, yFall < 300 ? "grey" : "brown");
-  }
-
-  if (e.key === "2" && inRange && gridMap[key]) {
-    player.miningTarget = key;
-    player.miningProgress++;
-    let block = gridMap[key];
-    const maxHits = miningStrength[block.type];
-    block.damage = player.miningProgress / maxHits;
-    if (player.miningProgress >= maxHits) {
-      delete gridMap[key];
-      for (let y = mouseGridY + 50; y <= 800; y += 50) {
-        const aboveKey = getGridKey(mouseGridX, y);
-        const belowKey = getGridKey(mouseGridX, y - 50);
-        if (gridMap[aboveKey] && !gridMap[belowKey]) {
-          gridMap[belowKey] = gridMap[aboveKey];
-          gridMap[belowKey].y -= 50;
-          delete gridMap[aboveKey];
-        } else break;
+    if (selectedItem === 1 && isInReach && block) {
+      // Mine with shovel
+      block.hp--;
+      if (block.hp <= 0) {
+        WORLD[gridY][gridX] = null;
+        fallBlocks(gridX, gridY);
       }
-      for (let i = 0; i < 10; i++) {
-        particles.push(new Particle(mouseGridX, mouseGridY, "gray"));
-      }
-      player.miningProgress = 0;
-      player.miningTarget = null;
     }
-  } else if (player.miningTarget !== key) {
-    player.miningProgress = 0;
-    player.miningTarget = null;
+    if (selectedItem === 0 && isInReach && !block) {
+      // Place block (falls if floating)
+      let placeY = gridY;
+      while (placeY > 0 && !WORLD[placeY - 1][gridX]) placeY--;
+      if (placeY < GRID_HEIGHT) {
+        WORLD[placeY][gridX] = { type: "dirt", hp: DAMAGE_THRESHOLD.dirt };
+      }
+    }
   }
 });
 
-// Update
+function fallBlocks(x, y) {
+  for (let i = y + 1; i < GRID_HEIGHT; i++) {
+    if (WORLD[i][x]) {
+      WORLD[i - 1][x] = WORLD[i][x];
+      WORLD[i][x] = null;
+    } else break;
+  }
+}
+
+// === Update ===
 function update() {
-  if (keys.a) player.x -= player.speed;
-  if (keys.d) player.x += player.speed;
+  // Movement
+  if (keys["a"]) player.x -= player.speed;
+  if (keys["d"]) player.x += player.speed;
 
+  // Apply gravity
+  player.vy += player.gravity;
+  player.y += player.vy;
   player.grounded = false;
 
-  const px = Math.floor((player.x + 25) / 50) * 50;
-  const py = Math.floor((player.y + 25) / 50) * 50;
-  const belowKey = getGridKey(px, py - 50);
-  if (player.y <= 0) {
-    player.y = 0;
-    player.vy = 0;
-    player.grounded = true;
-  } else if (gridMap[belowKey]) {
-    player.y = py;
-    player.vy = 0;
-    player.grounded = true;
+  // Ground collision
+  const footY = Math.floor(player.y / TILE_SIZE);
+  const midX = Math.floor((player.x + player.width / 2) / TILE_SIZE);
+  if (footY >= 0 && footY < GRID_HEIGHT && midX >= 0 && midX < GRID_WIDTH) {
+    if (WORLD[footY][midX]) {
+      player.y = footY * TILE_SIZE;
+      player.vy = 0;
+      player.grounded = true;
+    }
   }
 
-  if (jumpBuffer > 0 && player.grounded) {
+  // Jump
+  if (keys["w"] && player.grounded) {
     player.vy = player.jumpStrength;
-    jumpBuffer = 0;
-  }
-  if (!player.grounded) {
-    player.vy += player.gravity;
-    player.y += player.vy;
+    player.grounded = false;
   }
 
-  for (let i = particles.length - 1; i >= 0; i--) {
-    particles[i].update();
-    if (particles[i].alpha <= 0) particles.splice(i, 1);
-  }
+  // Clamp to canvas
+  player.x = Math.max(0, Math.min(player.x, canvas.width - player.width));
+  player.y = Math.min(canvas.height - player.height, player.y);
 }
 
-// Draw
+// === Draw ===
 function draw() {
   // Background
-  for (let y = 0; y < 800; y += 50) {
-    for (let x = 0; x < 800; x += 50) {
-      const drawY = 800 - y - 50;
-      if (y > 500) ctx.fillStyle = "#222";
-      else ctx.fillStyle = "#3a2a1a";
-      ctx.fillRect(x, drawY, 50, 50);
+  for (let y = 0; y < GRID_HEIGHT; y++) {
+    for (let x = 0; x < GRID_WIDTH; x++) {
+      const block = WORLD[y][x];
+      if (block) {
+        let color = block.type === "stone" ? "lightgray" : "#b97b56";
+        if (block.ore === "gold") color = "#FFD700";
+        if (block.ore === "silver") color = "#C0C0C0";
+        if (block.ore === "coal") color = "#333";
+        ctx.fillStyle = color;
+        ctx.fillRect(x * TILE_SIZE, canvas.height - 100 - (y + 1) * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+      }
     }
   }
 
-  // Blocks
-  for (let key in gridMap) {
-    const block = gridMap[key];
-    const drawY = 800 - block.y - 50;
-    ctx.fillStyle = block.color;
-    ctx.fillRect(block.x, drawY, 50, 50);
-    if (block.ores) {
-      ctx.fillStyle = block.ores;
-      ctx.fillRect(block.x + 20, drawY + 20, 5, 5);
-    }
-    if (block.damage) {
-      ctx.fillStyle = `rgba(255,0,0,${block.damage})`;
-      ctx.fillRect(block.x, drawY, 50, 50);
+  // Background color above/below y=500
+  ctx.fillStyle = "#87ceeb"; // sky
+  ctx.fillRect(0, 0, canvas.width, canvas.height - 900);
+
+  // Player
+  ctx.fillStyle = player.color;
+  ctx.fillRect(player.x, canvas.height - 100 - player.y - player.height, player.width, player.height);
+
+  // Shovel
+  ctx.strokeStyle = "brown";
+  ctx.beginPath();
+  ctx.moveTo(player.x + 25, canvas.height - 100 - player.y - 25);
+  ctx.lineTo(mouseX, mouseY);
+  ctx.stroke();
+
+  // Health bar
+  const healthBarX = canvas.width - 210;
+  ctx.fillStyle = "black";
+  ctx.fillRect(healthBarX, 10, 200, 20);
+  ctx.fillStyle = "red";
+  ctx.fillRect(healthBarX, 10, 200 * (player.health / player.maxHealth), 20);
+
+  // Coordinates
+  ctx.fillStyle = "black";
+  ctx.font = "16px monospace";
+  ctx.fillText(`X: ${Math.floor(player.x / TILE_SIZE)} Y: ${Math.floor(player.y / TILE_SIZE)}`, canvas.width - 200, 45);
+
+  // Hotbar
+  for (let i = 0; i < 8; i++) {
+    const x = i * 100;
+    ctx.strokeStyle = i === selectedItem ? "yellow" : "black";
+    ctx.strokeRect(x, canvas.height - 90, 100, 90);
+    if (HOTBAR[i] === "shovel") {
+      ctx.fillStyle = "brown";
+      ctx.fillText("🪓", x + 40, canvas.height - 50);
+    } else if (HOTBAR[i] === "block") {
+      ctx.fillStyle = "gray";
+      ctx.fillRect(x + 25, canvas.height - 65, 50, 50);
     }
   }
 
   // Outline
-  const mx = Math.floor(mouse.x / 50) * 50;
-  const my = Math.floor(mouse.y / 50) * 50;
-  const inRange = Math.abs(mx - px) <= 50 && Math.abs(my - py) <= 50;
-  ctx.strokeStyle = inRange ? (!gridMap[getGridKey(mx, my)] ? "lime" : "#f88") : "red";
+  const hoverX = Math.floor(mouseX / TILE_SIZE);
+  const hoverY = Math.floor((canvas.height - mouseY - 100) / TILE_SIZE);
+  const dx = hoverX - Math.floor((player.x + player.width / 2) / TILE_SIZE);
+  const dy = hoverY - Math.floor(player.y / TILE_SIZE);
+  const reachable = Math.abs(dx) <= 1 && Math.abs(dy) <= 1;
+
+  ctx.strokeStyle = reachable ? (WORLD[hoverY]?.[hoverX] ? "#faa" : "lime") : "red";
   ctx.lineWidth = 2;
-  ctx.strokeRect(mx, 800 - my - 50, 50, 50);
-
-  // Player
-  ctx.fillStyle = player.color;
-  ctx.fillRect(player.x, 800 - player.y - 50, 50, 50);
-
-  // Health bar (top right)
-  ctx.fillStyle = "black";
-  ctx.fillRect(650, 10, 140, 20);
-  ctx.fillStyle = "red";
-  ctx.fillRect(650, 10, 140 * (player.health / player.maxHealth), 20);
-
-  // Particles
-  for (let p of particles) p.draw();
-
-  // Coordinates
-  ctx.fillStyle = "white";
-  ctx.font = "16px Arial";
-  ctx.fillText(`X: ${px}, Y: ${py}`, 10, 20);
-
-  // Hotbar
-  for (let i = 0; i < 8; i++) {
-    ctx.strokeStyle = "white";
-    ctx.strokeRect(i * 100, hotbarY, 100, 100);
-  }
-  // Slot 1: Block icon
-  ctx.fillStyle = "#ccc";
-  ctx.fillRect(10, hotbarY + 10, 30, 30);
-  // Slot 2: Shovel icon (facing right for now)
-  ctx.fillStyle = "#555";
-  ctx.beginPath();
-  ctx.moveTo(110, hotbarY + 50);
-  ctx.lineTo(130, hotbarY + 40);
-  ctx.lineTo(130, hotbarY + 60);
-  ctx.fill();
+  ctx.strokeRect(hoverX * TILE_SIZE, canvas.height - 100 - (hoverY + 1) * TILE_SIZE, TILE_SIZE, TILE_SIZE);
 }
 
-// Game loop
 function loop() {
   update();
   draw();
   requestAnimationFrame(loop);
 }
+
 loop();
-</script>
-</body>
-</html>
