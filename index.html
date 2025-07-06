@@ -4,15 +4,8 @@
   <meta charset="UTF-8">
   <title>2D RTS Game</title>
   <style>
-    html, body {
-      margin: 0;
-      overflow: hidden;
-      background: #222;
-    }
-    canvas {
-      display: block;
-      background-color: #444;
-    }
+    body, html { margin: 0; overflow: hidden; background: #111; }
+    canvas { display: block; background: #333; }
   </style>
 </head>
 <body>
@@ -21,155 +14,218 @@
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
-// Game State
+const TILE_SIZE = 64;
+const MAP_WIDTH = 2000;
+const MAP_HEIGHT = 2000;
+const FOG_RADIUS = 150;
+
 const camera = { x: 0, y: 0 };
 const keys = {};
-const TILE_SIZE = 64;
+const resources = { wood: 0 };
+const mouse = { x: 0, y: 0, worldX: 0, worldY: 0 };
 
-// Units
-const units = [{
-  x: 200, y: 200, width: 20, height: 20,
-  selected: false, speed: 2,
-  target: { x: 200, y: 200 }
-}];
+let selecting = false;
+let selectStart = { x: 0, y: 0 };
+
+// Units & Structures
+const units = [];
+const buildings = [{ x: 300, y: 300, width: 40, height: 40, type: "base" }];
+const trees = Array.from({ length: 30 }, () => ({
+  x: Math.random() * MAP_WIDTH,
+  y: Math.random() * MAP_HEIGHT,
+  width: 32, height: 32, resource: 100
+}));
+const fogData = [];
+
+function spawnUnit(type) {
+  units.push({
+    x: buildings[0].x + 50 + Math.random() * 50,
+    y: buildings[0].y + 50 + Math.random() * 50,
+    width: 20, height: 20,
+    selected: false, target: null,
+    type: type,
+    gathering: false,
+    vision: 150
+  });
+}
 
 // Input
-let mouse = { x: 0, y: 0, worldX: 0, worldY: 0 };
-let selecting = false;
-let selectBoxStart = { x: 0, y: 0 };
-
-// Listen to input
-canvas.addEventListener("mousedown", (e) => {
-  const rect = canvas.getBoundingClientRect();
-  mouse.x = e.clientX - rect.left;
-  mouse.y = e.clientY - rect.top;
+canvas.addEventListener("mousedown", e => {
+  mouse.x = e.offsetX; mouse.y = e.offsetY;
   mouse.worldX = mouse.x + camera.x;
   mouse.worldY = mouse.y + camera.y;
-
   if (e.button === 0) {
-    // Start selection box
     selecting = true;
-    selectBoxStart = { x: mouse.worldX, y: mouse.worldY };
+    selectStart = { x: mouse.worldX, y: mouse.worldY };
   } else if (e.button === 2) {
-    // Move selected units
     for (let unit of units) {
       if (unit.selected) {
-        unit.target.x = mouse.worldX;
-        unit.target.y = mouse.worldY;
+        unit.target = { x: mouse.worldX, y: mouse.worldY };
+        unit.gathering = false;
       }
     }
   }
 });
-
-canvas.addEventListener("mouseup", (e) => {
+canvas.addEventListener("mouseup", e => {
   if (e.button === 0 && selecting) {
-    const x1 = Math.min(selectBoxStart.x, mouse.worldX);
-    const y1 = Math.min(selectBoxStart.y, mouse.worldY);
-    const x2 = Math.max(selectBoxStart.x, mouse.worldX);
-    const y2 = Math.max(selectBoxStart.y, mouse.worldY);
-
-    for (let unit of units) {
-      unit.selected = (
-        unit.x >= x1 && unit.x <= x2 &&
-        unit.y >= y1 && unit.y <= y2
-      );
-    }
     selecting = false;
+    const x1 = Math.min(selectStart.x, mouse.worldX);
+    const y1 = Math.min(selectStart.y, mouse.worldY);
+    const x2 = Math.max(selectStart.x, mouse.worldX);
+    const y2 = Math.max(selectStart.y, mouse.worldY);
+    for (let unit of units) {
+      unit.selected = (unit.x >= x1 && unit.x <= x2 && unit.y >= y1 && unit.y <= y2);
+    }
   }
 });
-
-canvas.addEventListener("contextmenu", (e) => {
-  e.preventDefault(); // disable context menu
-});
-
-window.addEventListener("mousemove", (e) => {
-  const rect = canvas.getBoundingClientRect();
-  mouse.x = e.clientX - rect.left;
-  mouse.y = e.clientY - rect.top;
+canvas.addEventListener("mousemove", e => {
+  mouse.x = e.offsetX; mouse.y = e.offsetY;
   mouse.worldX = mouse.x + camera.x;
   mouse.worldY = mouse.y + camera.y;
 });
+canvas.addEventListener("contextmenu", e => e.preventDefault());
+window.addEventListener("keydown", e => {
+  keys[e.key.toLowerCase()] = true;
+  if (e.key === "1") spawnUnit("worker");
+  if (e.key === "2") spawnUnit("soldier");
+});
+window.addEventListener("keyup", e => keys[e.key.toLowerCase()] = false);
 
-window.addEventListener("keydown", (e) => keys[e.key.toLowerCase()] = true);
-window.addEventListener("keyup", (e) => keys[e.key.toLowerCase()] = false);
-
-// Game Loop
+// Logic
 function update() {
-  // Camera movement
   if (keys["w"]) camera.y -= 5;
   if (keys["s"]) camera.y += 5;
   if (keys["a"]) camera.x -= 5;
   if (keys["d"]) camera.x += 5;
 
-  // Unit movement
   for (let unit of units) {
-    const dx = unit.target.x - unit.x;
-    const dy = unit.target.y - unit.y;
-    const dist = Math.hypot(dx, dy);
-    if (dist > 1) {
-      unit.x += (dx / dist) * unit.speed;
-      unit.y += (dy / dist) * unit.speed;
+    if (unit.target) {
+      const dx = unit.target.x - unit.x;
+      const dy = unit.target.y - unit.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist > 1) {
+        unit.x += (dx / dist) * 2;
+        unit.y += (dy / dist) * 2;
+      } else {
+        unit.target = null;
+      }
+    }
+
+    // Auto-gather if worker near a tree
+    if (unit.type === "worker" && !unit.target && !unit.gathering) {
+      for (let tree of trees) {
+        if (tree.resource > 0 && Math.hypot(tree.x - unit.x, tree.y - unit.y) < 30) {
+          unit.gathering = true;
+          setInterval(() => {
+            if (tree.resource > 0) {
+              tree.resource -= 5;
+              resources.wood += 5;
+            }
+          }, 1000);
+          break;
+        }
+      }
     }
   }
 }
 
-// Rendering
-function drawGrid() {
-  const cols = Math.ceil(canvas.width / TILE_SIZE) + 2;
-  const rows = Math.ceil(canvas.height / TILE_SIZE) + 2;
-
-  ctx.strokeStyle = "#555";
-  for (let i = -1; i < cols; i++) {
-    ctx.beginPath();
-    ctx.moveTo(i * TILE_SIZE - camera.x % TILE_SIZE, 0);
-    ctx.lineTo(i * TILE_SIZE - camera.x % TILE_SIZE, canvas.height);
-    ctx.stroke();
+// Drawing
+function drawMap() {
+  // Background tiles
+  ctx.fillStyle = "#444";
+  for (let x = 0; x < MAP_WIDTH; x += TILE_SIZE) {
+    for (let y = 0; y < MAP_HEIGHT; y += TILE_SIZE) {
+      ctx.fillRect(x - camera.x, y - camera.y, TILE_SIZE - 1, TILE_SIZE - 1);
+    }
   }
-  for (let i = -1; i < rows; i++) {
-    ctx.beginPath();
-    ctx.moveTo(0, i * TILE_SIZE - camera.y % TILE_SIZE);
-    ctx.lineTo(canvas.width, i * TILE_SIZE - camera.y % TILE_SIZE);
-    ctx.stroke();
+}
+
+function drawTrees() {
+  for (let tree of trees) {
+    if (tree.resource <= 0) continue;
+    ctx.fillStyle = "#2f4";
+    ctx.fillRect(tree.x - camera.x, tree.y - camera.y, tree.width, tree.height);
+  }
+}
+
+function drawBuildings() {
+  ctx.fillStyle = "#88f";
+  for (let b of buildings) {
+    ctx.fillRect(b.x - camera.x, b.y - camera.y, b.width, b.height);
   }
 }
 
 function drawUnits() {
-  for (let unit of units) {
-    ctx.fillStyle = unit.selected ? "#00ff00" : "#fff";
-    ctx.fillRect(unit.x - camera.x - 10, unit.y - camera.y - 10, unit.width, unit.height);
+  for (let u of units) {
+    ctx.fillStyle = u.type === "worker" ? "#ff0" : "#0ff";
+    ctx.fillRect(u.x - camera.x - 10, u.y - camera.y - 10, u.width, u.height);
+    if (u.selected) {
+      ctx.strokeStyle = "#0f0";
+      ctx.strokeRect(u.x - camera.x - 12, u.y - camera.y - 12, u.width + 4, u.height + 4);
+    }
   }
 }
 
 function drawSelectionBox() {
   if (selecting) {
     ctx.strokeStyle = "yellow";
-    const sx = selectBoxStart.x - camera.x;
-    const sy = selectBoxStart.y - camera.y;
-    const ex = mouse.worldX - camera.x;
-    const ey = mouse.worldY - camera.y;
-    ctx.strokeRect(
-      Math.min(sx, ex),
-      Math.min(sy, ey),
-      Math.abs(sx - ex),
-      Math.abs(sy - ey)
-    );
+    const x1 = selectStart.x - camera.x;
+    const y1 = selectStart.y - camera.y;
+    const x2 = mouse.worldX - camera.x;
+    const y2 = mouse.worldY - camera.y;
+    ctx.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x1 - x2), Math.abs(y1 - y2));
   }
+}
+
+function drawFog() {
+  ctx.save();
+  ctx.globalAlpha = 0.9;
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.globalCompositeOperation = "destination-out";
+  for (let u of units) {
+    ctx.beginPath();
+    ctx.arc(u.x - camera.x, u.y - camera.y, FOG_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 function drawUI() {
   ctx.fillStyle = "white";
   ctx.font = "16px sans-serif";
-  ctx.fillText("Units: " + units.length, 10, 20);
+  ctx.fillText("Wood: " + resources.wood, 20, 30);
+  ctx.fillText("1 = Worker | 2 = Soldier", 20, 50);
 }
 
-// Main loop
+function drawMinimap() {
+  const miniW = 200, miniH = 200;
+  const scaleX = miniW / MAP_WIDTH;
+  const scaleY = miniH / MAP_HEIGHT;
+  const x = canvas.width - miniW - 10;
+  const y = canvas.height - miniH - 10;
+  ctx.fillStyle = "#111";
+  ctx.fillRect(x, y, miniW, miniH);
+  for (let u of units) {
+    ctx.fillStyle = u.type === "worker" ? "#ff0" : "#0ff";
+    ctx.fillRect(x + u.x * scaleX, y + u.y * scaleY, 3, 3);
+  }
+  ctx.strokeStyle = "#fff";
+  ctx.strokeRect(x + camera.x * scaleX, y + camera.y * scaleY, canvas.width * scaleX, canvas.height * scaleY);
+}
+
+// Game Loop
 function gameLoop() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   update();
-  drawGrid();
+  drawMap();
+  drawTrees();
+  drawBuildings();
   drawUnits();
   drawSelectionBox();
+  drawFog();
   drawUI();
+  drawMinimap();
   requestAnimationFrame(gameLoop);
 }
 gameLoop();
