@@ -4,56 +4,70 @@
   <meta charset="UTF-8">
   <title>2D RTS Game</title>
   <style>
-    body, html { margin: 0; overflow: hidden; background: #111; }
-    canvas { display: block; background: #333; }
+    html, body { margin: 0; overflow: hidden; background: #111; }
+    canvas { display: block; background: #222; }
   </style>
 </head>
 <body>
-<canvas id="gameCanvas" width="1980" height="1980"></canvas>
+<canvas id="gameCanvas" width="1280" height="720"></canvas>
 <script>
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
+// Game setup
 const TILE_SIZE = 64;
 const MAP_WIDTH = 2000;
 const MAP_HEIGHT = 2000;
-const FOG_RADIUS = 150;
 
 const camera = { x: 0, y: 0 };
 const keys = {};
-const resources = { wood: 0 };
 const mouse = { x: 0, y: 0, worldX: 0, worldY: 0 };
-
 let selecting = false;
 let selectStart = { x: 0, y: 0 };
+const resources = { wood: 0, stone: 0 };
 
-// Units & Structures
+// Buildings and units
+const buildings = [{
+  x: 300, y: 300, width: 40, height: 40, type: "base"
+}];
+
 const units = [];
-const buildings = [{ x: 300, y: 300, width: 40, height: 40, type: "base" }];
+
 const trees = Array.from({ length: 30 }, () => ({
   x: Math.random() * MAP_WIDTH,
   y: Math.random() * MAP_HEIGHT,
-  width: 32, height: 32, resource: 100
+  type: "tree",
+  resource: 100
 }));
-const fogData = [];
 
-function spawnUnit(type) {
+const stones = Array.from({ length: 20 }, () => ({
+  x: Math.random() * MAP_WIDTH,
+  y: Math.random() * MAP_HEIGHT,
+  type: "stone",
+  resource: 100
+}));
+
+function spawnWorkerFromBase() {
+  const base = buildings[0];
   units.push({
-    x: buildings[0].x + 50 + Math.random() * 50,
-    y: buildings[0].y + 50 + Math.random() * 50,
-    width: 20, height: 20,
-    selected: false, target: null,
-    type: type,
-    gathering: false,
-    vision: 150
+    x: base.x + 50 + Math.random() * 20,
+    y: base.y + 50 + Math.random() * 20,
+    width: 20,
+    height: 20,
+    selected: false,
+    type: "worker",
+    target: null,
+    gathering: false
   });
 }
 
 // Input
-canvas.addEventListener("mousedown", e => {
-  mouse.x = e.offsetX; mouse.y = e.offsetY;
+canvas.addEventListener("mousedown", (e) => {
+  mouse.x = e.offsetX;
+  mouse.y = e.offsetY;
   mouse.worldX = mouse.x + camera.x;
   mouse.worldY = mouse.y + camera.y;
+
   if (e.button === 0) {
     selecting = true;
     selectStart = { x: mouse.worldX, y: mouse.worldY };
@@ -66,32 +80,39 @@ canvas.addEventListener("mousedown", e => {
     }
   }
 });
-canvas.addEventListener("mouseup", e => {
+canvas.addEventListener("mouseup", (e) => {
   if (e.button === 0 && selecting) {
-    selecting = false;
     const x1 = Math.min(selectStart.x, mouse.worldX);
     const y1 = Math.min(selectStart.y, mouse.worldY);
     const x2 = Math.max(selectStart.x, mouse.worldX);
     const y2 = Math.max(selectStart.y, mouse.worldY);
     for (let unit of units) {
-      unit.selected = (unit.x >= x1 && unit.x <= x2 && unit.y >= y1 && unit.y <= y2);
+      unit.selected = (
+        unit.x >= x1 && unit.x <= x2 &&
+        unit.y >= y1 && unit.y <= y2
+      );
     }
+    selecting = false;
   }
 });
-canvas.addEventListener("mousemove", e => {
-  mouse.x = e.offsetX; mouse.y = e.offsetY;
+canvas.addEventListener("mousemove", (e) => {
+  mouse.x = e.offsetX;
+  mouse.y = e.offsetY;
   mouse.worldX = mouse.x + camera.x;
   mouse.worldY = mouse.y + camera.y;
 });
 canvas.addEventListener("contextmenu", e => e.preventDefault());
-window.addEventListener("keydown", e => {
+window.addEventListener("keydown", (e) => {
   keys[e.key.toLowerCase()] = true;
-  if (e.key === "1") spawnUnit("worker");
-  if (e.key === "2") spawnUnit("soldier");
+  if (e.key === "1") {
+    spawnWorkerFromBase();
+  }
 });
-window.addEventListener("keyup", e => keys[e.key.toLowerCase()] = false);
+window.addEventListener("keyup", (e) => {
+  keys[e.key.toLowerCase()] = false;
+});
 
-// Logic
+// Game loop
 function update() {
   if (keys["w"]) camera.y -= 5;
   if (keys["s"]) camera.y += 5;
@@ -111,7 +132,7 @@ function update() {
       }
     }
 
-    // Auto-gather if worker near a tree
+    // Auto-gathering
     if (unit.type === "worker" && !unit.target && !unit.gathering) {
       for (let tree of trees) {
         if (tree.resource > 0 && Math.hypot(tree.x - unit.x, tree.y - unit.y) < 30) {
@@ -125,42 +146,67 @@ function update() {
           break;
         }
       }
+      for (let stone of stones) {
+        if (stone.resource > 0 && Math.hypot(stone.x - unit.x, stone.y - unit.y) < 30) {
+          unit.gathering = true;
+          setInterval(() => {
+            if (stone.resource > 0) {
+              stone.resource -= 5;
+              resources.stone += 5;
+            }
+          }, 1000);
+          break;
+        }
+      }
     }
   }
 }
 
-// Drawing
+// Draw functions
 function drawMap() {
-  // Background tiles
-  ctx.fillStyle = "#444";
-  for (let x = 0; x < MAP_WIDTH; x += TILE_SIZE) {
-    for (let y = 0; y < MAP_HEIGHT; y += TILE_SIZE) {
-      ctx.fillRect(x - camera.x, y - camera.y, TILE_SIZE - 1, TILE_SIZE - 1);
-    }
-  }
+  ctx.fillStyle = "#2b2b2b";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
 }
 
-function drawTrees() {
+function drawResources() {
   for (let tree of trees) {
     if (tree.resource <= 0) continue;
     ctx.fillStyle = "#2f4";
-    ctx.fillRect(tree.x - camera.x, tree.y - camera.y, tree.width, tree.height);
+    ctx.fillRect(tree.x - camera.x, tree.y - camera.y, 16, 16);
+  }
+  for (let stone of stones) {
+    if (stone.resource <= 0) continue;
+    ctx.fillStyle = "#aaa";
+    ctx.fillRect(stone.x - camera.x, stone.y - camera.y, 16, 16);
   }
 }
 
 function drawBuildings() {
-  ctx.fillStyle = "#88f";
   for (let b of buildings) {
+    ctx.fillStyle = "#44f";
     ctx.fillRect(b.x - camera.x, b.y - camera.y, b.width, b.height);
+    ctx.fillStyle = "#fff";
+    ctx.font = "12px sans-serif";
+    ctx.fillText("B", b.x - camera.x + 12, b.y - camera.y + 25);
   }
 }
 
 function drawUnits() {
   for (let u of units) {
-    ctx.fillStyle = u.type === "worker" ? "#ff0" : "#0ff";
+    // Unit body
+    ctx.fillStyle = "#fff";
     ctx.fillRect(u.x - camera.x - 10, u.y - camera.y - 10, u.width, u.height);
+
+    // Unit label
+    ctx.fillStyle = "#000";
+    ctx.font = "14px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(u.type[0].toUpperCase(), u.x - camera.x, u.y - camera.y + 5);
+
+    // Selection outline
     if (u.selected) {
       ctx.strokeStyle = "#0f0";
+      ctx.lineWidth = 2;
       ctx.strokeRect(u.x - camera.x - 12, u.y - camera.y - 12, u.width + 4, u.height + 4);
     }
   }
@@ -168,64 +214,35 @@ function drawUnits() {
 
 function drawSelectionBox() {
   if (selecting) {
-    ctx.strokeStyle = "yellow";
     const x1 = selectStart.x - camera.x;
     const y1 = selectStart.y - camera.y;
     const x2 = mouse.worldX - camera.x;
     const y2 = mouse.worldY - camera.y;
+    ctx.fillStyle = "rgba(0, 120, 255, 0.2)";
+    ctx.fillRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x1 - x2), Math.abs(y1 - y2));
+    ctx.strokeStyle = "rgba(0, 120, 255, 0.8)";
     ctx.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x1 - x2), Math.abs(y1 - y2));
   }
 }
 
-function drawFog() {
-  ctx.save();
-  ctx.globalAlpha = 0.9;
-  ctx.fillStyle = "#000";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.globalCompositeOperation = "destination-out";
-  for (let u of units) {
-    ctx.beginPath();
-    ctx.arc(u.x - camera.x, u.y - camera.y, FOG_RADIUS, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
 function drawUI() {
-  ctx.fillStyle = "white";
+  ctx.fillStyle = "#fff";
   ctx.font = "16px sans-serif";
-  ctx.fillText("Wood: " + resources.wood, 20, 30);
-  ctx.fillText("1 = Worker | 2 = Soldier", 20, 50);
+  ctx.textAlign = "left";
+  ctx.fillText(`Wood: ${resources.wood} | Stone: ${resources.stone}`, 20, 30);
+  ctx.fillText("1 = Spawn Worker (Base Only)", 20, 50);
 }
 
-function drawMinimap() {
-  const miniW = 200, miniH = 200;
-  const scaleX = miniW / MAP_WIDTH;
-  const scaleY = miniH / MAP_HEIGHT;
-  const x = canvas.width - miniW - 10;
-  const y = canvas.height - miniH - 10;
-  ctx.fillStyle = "#111";
-  ctx.fillRect(x, y, miniW, miniH);
-  for (let u of units) {
-    ctx.fillStyle = u.type === "worker" ? "#ff0" : "#0ff";
-    ctx.fillRect(x + u.x * scaleX, y + u.y * scaleY, 3, 3);
-  }
-  ctx.strokeStyle = "#fff";
-  ctx.strokeRect(x + camera.x * scaleX, y + camera.y * scaleY, canvas.width * scaleX, canvas.height * scaleY);
-}
-
-// Game Loop
+// Main loop
 function gameLoop() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   update();
   drawMap();
-  drawTrees();
+  drawResources();
   drawBuildings();
   drawUnits();
   drawSelectionBox();
-  drawFog();
   drawUI();
-  drawMinimap();
   requestAnimationFrame(gameLoop);
 }
 gameLoop();
