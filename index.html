@@ -2,249 +2,155 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>2D RTS Game with Building System</title>
+  <title>Mage War</title>
   <style>
     html, body { margin: 0; overflow: hidden; background: #111; }
     canvas { display: block; background: #222; }
   </style>
 </head>
 <body>
-<canvas id="gameCanvas" width="1280" height="720"></canvas>
+<canvas id="gameCanvas" width="1980" height="1080"></canvas>
 <script>
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
-const TILE_SIZE = 64;
-const MAP_WIDTH = 2000;
-const MAP_HEIGHT = 2000;
-const camera = { x: 0, y: 0 };
-const keys = {};
-const mouse = { x: 0, y: 0, worldX: 0, worldY: 0 };
-let selecting = false;
-let selectStart = { x: 0, y: 0 };
-let buildingMode = false;
-let selectedBuildOption = null;
-let draggingBuilding = null;
+let keys = {};
+let mouse = { x: 0, y: 0, down: false };
 
-const resources = { wood: 100, stone: 100, gold: 200 };
-const maxStorage = { wood: 200, stone: 200, gold: 200 };
+document.addEventListener("keydown", e => keys[e.key] = true);
+document.addEventListener("keyup", e => keys[e.key] = false);
+canvas.addEventListener("mousedown", () => mouse.down = true);
+canvas.addEventListener("mouseup", () => mouse.down = false);
+canvas.addEventListener("mousemove", e => {
+  const rect = canvas.getBoundingClientRect();
+  mouse.x = e.clientX - rect.left;
+  mouse.y = e.clientY - rect.top;
+});
 
-const buildOptions = [
-  { name: "Storage", cost: { wood: 50, stone: 30 }, width: 40, height: 40, type: "storage" },
-  { name: "Turret", cost: { wood: 20, stone: 80 }, width: 30, height: 30, type: "turret" },
-  { name: "Lumber Camp", cost: { wood: 30, stone: 20 }, width: 40, height: 40, type: "lumber" },
-  { name: "Mine", cost: { wood: 20, stone: 40 }, width: 40, height: 40, type: "mine" }
-];
+// Player
+const player = {
+  x: 100, y: 100, size: 30, speed: 4,
+  bullets: [], fireRate: 300, lastFired: 0, hp: 5
+};
 
-const buildings = [{ x: 300, y: 300, width: 40, height: 40, type: "base", progress: 1, complete: true }];
-const units = [];
-const trees = Array.from({ length: 30 }, () => ({ x: Math.random() * MAP_WIDTH, y: Math.random() * MAP_HEIGHT, type: "tree", resource: 100 }));
-const stones = Array.from({ length: 20 }, () => ({ x: Math.random() * MAP_WIDTH, y: Math.random() * MAP_HEIGHT, type: "stone", resource: 100 }));
+// Enemies
+let enemies = [];
+let currentRoom = 1;
 
-function spawnWorkerFromBase() {
-  const base = buildings[0];
-  units.push({
-    x: base.x + 50, y: base.y + 50,
-    width: 20, height: 20,
-    selected: false, type: "worker",
-    target: null, gathering: false
-  });
+// Game loop
+function gameLoop(timestamp) {
+  update(timestamp);
+  draw();
+  requestAnimationFrame(gameLoop);
 }
 
-canvas.addEventListener("mousedown", (e) => {
-  mouse.x = e.offsetX; mouse.y = e.offsetY;
-  mouse.worldX = mouse.x + camera.x;
-  mouse.worldY = mouse.y + camera.y;
+function update(timestamp) {
+  // Move player
+  if (keys["ArrowUp"] || keys["w"]) player.y -= player.speed;
+  if (keys["ArrowDown"] || keys["s"]) player.y += player.speed;
+  if (keys["ArrowLeft"] || keys["a"]) player.x -= player.speed;
+  if (keys["ArrowRight"] || keys["d"]) player.x += player.speed;
 
-  if (draggingBuilding) {
-    const buildOption = buildOptions[selectedBuildOption];
-    const canAfford = Object.keys(buildOption.cost).every(k => resources[k] >= buildOption.cost[k]);
-    if (canAfford) {
-      Object.keys(buildOption.cost).forEach(k => resources[k] -= buildOption.cost[k]);
-      buildings.push({
-        x: mouse.worldX, y: mouse.worldY,
-        width: buildOption.width, height: buildOption.height,
-        type: buildOption.type, progress: 0, complete: false
-      });
-    }
-    draggingBuilding = null;
-    selectedBuildOption = null;
-    return;
+  // Fire bullet
+  if (mouse.down && timestamp - player.lastFired > player.fireRate) {
+    const angle = Math.atan2(mouse.y - player.y, mouse.x - player.x);
+    player.bullets.push({
+      x: player.x, y: player.y,
+      vx: Math.cos(angle) * 7,
+      vy: Math.sin(angle) * 7,
+      size: 5
+    });
+    player.lastFired = timestamp;
   }
 
-  if (e.button === 0) {
-    selecting = true;
-    selectStart = { x: mouse.worldX, y: mouse.worldY };
-  } else if (e.button === 2) {
-    for (let unit of units) {
-      if (unit.selected) {
-        unit.target = { x: mouse.worldX, y: mouse.worldY };
-        unit.gathering = false;
+  // Update bullets
+  for (let b of player.bullets) {
+    b.x += b.vx;
+    b.y += b.vy;
+  }
+  player.bullets = player.bullets.filter(b => b.x > 0 && b.x < canvas.width && b.y > 0 && b.y < canvas.height);
+
+  // Update enemies
+  for (let e of enemies) {
+    const dx = player.x - e.x;
+    const dy = player.y - e.y;
+    const dist = Math.hypot(dx, dy);
+    e.x += (dx / dist) * e.speed;
+    e.y += (dy / dist) * e.speed;
+
+    // Collision with player
+    if (Math.hypot(player.x - e.x, player.y - e.y) < player.size / 2 + e.size / 2) {
+      player.hp--;
+      e.hit = true;
+    }
+  }
+  enemies = enemies.filter(e => !e.hit);
+
+  // Bullet hits
+  for (let b of player.bullets) {
+    for (let e of enemies) {
+      if (Math.hypot(b.x - e.x, b.y - e.y) < e.size) {
+        e.hit = true;
+        b.remove = true;
       }
     }
   }
-});
+  enemies = enemies.filter(e => !e.hit);
+  player.bullets = player.bullets.filter(b => !b.remove);
 
-canvas.addEventListener("mouseup", (e) => {
-  if (e.button === 0 && selecting) {
-    const x1 = Math.min(selectStart.x, mouse.worldX);
-    const y1 = Math.min(selectStart.y, mouse.worldY);
-    const x2 = Math.max(selectStart.x, mouse.worldX);
-    const y2 = Math.max(selectStart.y, mouse.worldY);
-    for (let unit of units) {
-      unit.selected = (
-        unit.x >= x1 && unit.x <= x2 &&
-        unit.y >= y1 && unit.y <= y2
-      );
-    }
-    selecting = false;
-  }
-});
-
-canvas.addEventListener("mousemove", (e) => {
-  mouse.x = e.offsetX;
-  mouse.y = e.offsetY;
-  mouse.worldX = mouse.x + camera.x;
-  mouse.worldY = mouse.y + camera.y;
-});
-
-canvas.addEventListener("contextmenu", e => e.preventDefault());
-
-window.addEventListener("keydown", (e) => {
-  keys[e.key.toLowerCase()] = true;
-  if (e.key === "1") spawnWorkerFromBase();
-  if (e.key === "b") {
-    const workerSelected = units.some(u => u.type === "worker" && u.selected);
-    if (workerSelected) buildingMode = !buildingMode;
-  }
-});
-
-window.addEventListener("keyup", (e) => {
-  keys[e.key.toLowerCase()] = false;
-});
-
-function update() {
-  if (keys["w"]) camera.y -= 5;
-  if (keys["s"]) camera.y += 5;
-  if (keys["a"]) camera.x -= 5;
-  if (keys["d"]) camera.x += 5;
-
-  for (let b of buildings) {
-    if (!b.complete) {
-      b.progress += 0.01;
-      if (b.progress >= 1) {
-        b.complete = true;
-      }
-    }
-  }
-
-  for (let unit of units) {
-    if (unit.target) {
-      const dx = unit.target.x - unit.x;
-      const dy = unit.target.y - unit.y;
-      const dist = Math.hypot(dx, dy);
-      if (dist > 1) {
-        unit.x += (dx / dist) * 2;
-        unit.y += (dy / dist) * 2;
-      } else {
-        unit.target = null;
-      }
-    }
+  // Check room cleared
+  if (enemies.length === 0) {
+    currentRoom++;
+    spawnEnemies(currentRoom + 2);
   }
 }
 
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = "#2b2b2b";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  for (let tree of trees) {
-    ctx.fillStyle = "#2f4";
-    ctx.fillRect(tree.x - camera.x, tree.y - camera.y, 16, 16);
+  // Draw player
+  ctx.fillStyle = "cyan";
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, player.size / 2, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Draw bullets
+  ctx.fillStyle = "orange";
+  for (let b of player.bullets) {
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.size, 0, Math.PI * 2);
+    ctx.fill();
   }
 
-  for (let stone of stones) {
-    ctx.fillStyle = "#aaa";
-    ctx.fillRect(stone.x - camera.x, stone.y - camera.y, 16, 16);
+  // Draw enemies
+  ctx.fillStyle = "red";
+  for (let e of enemies) {
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, e.size, 0, Math.PI * 2);
+    ctx.fill();
   }
 
-  for (let b of buildings) {
-    ctx.fillStyle = b.complete ? "#44f" : "#888";
-    ctx.fillRect(b.x - camera.x, b.y - camera.y, b.width, b.height);
-    ctx.fillStyle = "#fff";
-    ctx.font = "12px sans-serif";
-    ctx.fillText(b.type[0].toUpperCase(), b.x - camera.x + b.width / 2 - 4, b.y - camera.y + b.height / 2 + 4);
-    if (!b.complete) {
-      ctx.fillStyle = "#0f0";
-      ctx.fillRect(b.x - camera.x, b.y - camera.y + b.height + 2, b.width * b.progress, 4);
-      ctx.strokeStyle = "#000";
-      ctx.strokeRect(b.x - camera.x, b.y - camera.y + b.height + 2, b.width, 4);
-    }
-  }
-
-  for (let u of units) {
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(u.x - camera.x - 10, u.y - camera.y - 10, u.width, u.height);
-    ctx.fillStyle = "#000";
-    ctx.font = "14px sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText(u.type[0].toUpperCase(), u.x - camera.x, u.y - camera.y + 5);
-    if (u.selected) {
-      ctx.strokeStyle = "#0f0";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(u.x - camera.x - 12, u.y - camera.y - 12, u.width + 4, u.height + 4);
-    }
-  }
-
-  if (selecting) {
-    const x1 = selectStart.x - camera.x;
-    const y1 = selectStart.y - camera.y;
-    const x2 = mouse.worldX - camera.x;
-    const y2 = mouse.worldY - camera.y;
-    ctx.fillStyle = "rgba(0, 120, 255, 0.2)";
-    ctx.fillRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x1 - x2), Math.abs(y1 - y2));
-    ctx.strokeStyle = "rgba(0, 120, 255, 0.8)";
-    ctx.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x1 - x2), Math.abs(y1 - y2));
-  }
-
+  // HUD
   ctx.fillStyle = "#fff";
-  ctx.font = "16px sans-serif";
-  ctx.fillText(`Wood: ${resources.wood} | Stone: ${resources.stone} | Gold: ${resources.gold}`, 20, 30);
+  ctx.font = "20px Arial";
+  ctx.fillText("HP: " + player.hp, 20, 30);
+  ctx.fillText("Room: " + currentRoom, 20, 60);
+}
 
-  if (buildingMode) {
-    ctx.fillText("[B] Build Mode: Press number to select building (1-4)", 20, 50);
-    buildOptions.forEach((opt, i) => {
-      const x = 20 + i * 120;
-      ctx.fillStyle = "#333";
-      ctx.fillRect(x, canvas.height - 80, 100, 60);
-      ctx.fillStyle = "#fff";
-      ctx.fillText(`${i+1}. ${opt.name}`, x + 10, canvas.height - 55);
-      ctx.fillText(`W:${opt.cost.wood} S:${opt.cost.stone}`, x + 10, canvas.height - 35);
+function spawnEnemies(n) {
+  enemies = [];
+  for (let i = 0; i < n; i++) {
+    enemies.push({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height,
+      size: 20,
+      speed: 1 + Math.random()
     });
   }
-
-  if (draggingBuilding) {
-    const build = buildOptions[selectedBuildOption];
-    const canAfford = Object.keys(build.cost).every(k => resources[k] >= build.cost[k]);
-    ctx.fillStyle = canAfford ? "rgba(255,255,255,0.5)" : "rgba(255,0,0,0.5)";
-    ctx.fillRect(mouse.worldX - camera.x, mouse.worldY - camera.y, build.width, build.height);
-  }
 }
 
-canvas.addEventListener("keydown", e => {
-  const index = parseInt(e.key) - 1;
-  if (buildingMode && index >= 0 && index < buildOptions.length) {
-    selectedBuildOption = index;
-    draggingBuilding = true;
-  }
-});
-
-function loop() {
-  update();
-  draw();
-  requestAnimationFrame(loop);
-}
-loop();
+spawnEnemies(3);
+requestAnimationFrame(gameLoop);
 </script>
 </body>
 </html>
