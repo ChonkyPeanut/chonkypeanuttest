@@ -61,7 +61,7 @@ function update(timestamp) {
       size: 5
     });
     player.lastFired = timestamp;
-    player.mana -= 5;
+    player.mana -= 10;
   }
 
   // Update bullets
@@ -105,8 +105,8 @@ function update(timestamp) {
     spawnEnemies(currentRoom + 2);
   }
 
-  if (player.mana < 101) {
-    player.mana++;
+  if (player.mana < 100) {
+    player.mana + .1;
   }
 }
 
