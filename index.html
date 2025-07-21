@@ -52,7 +52,7 @@ function update(timestamp) {
   if (keys["ArrowRight"] || keys["d"]) player.x += player.speed;
 
   // Fire bullet
-  if (mouse.down && timestamp - player.lastFired > player.fireRate && player.mana > 4) {
+  if (mouse.down && timestamp - player.lastFired > player.fireRate && player.mana > 9) {
     const angle = Math.atan2(mouse.y - player.y, mouse.x - player.x);
     player.bullets.push({
       x: player.x, y: player.y,
@@ -106,7 +106,7 @@ function update(timestamp) {
   }
 
   if (player.mana < 100) {
-    player.mana++;
+    player.mana = player.mana + 1;
   }
 }
 
