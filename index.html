@@ -140,7 +140,11 @@ function draw() {
   ctx.font = "20px Arial";
   ctx.fillText("HP: " + player.hp, 20, 30);
   ctx.fillText("Room: " + currentRoom, 20, 60);
-  ctx.fillText("Mana: " + player.mana, 20, 90);
+  let myMana = player.mana;
+  let characterLimit = 3;
+  let truncatedText = myText.substring(0, characterLimit); 
+  ctx.fillText(truncatedText, 10, 50); 
+  ctx.fillText("Mana: " + myMana, 20, 90);
 }
 
 function spawnEnemies(n) {
