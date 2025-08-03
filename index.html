@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Mage War</title>
+  <title>2D shooter</title>
   <style>
     html, body { margin: 0; overflow: hidden; background: #111; }
     canvas { display: block; background: #222; }
@@ -30,12 +30,8 @@ canvas.addEventListener("mousemove", e => {
 // Player
 const player = {
   x: 100, y: 100, size: 30, speed: 4,
-  bullets: [], fireRate: 300, lastFired: 0, hp: 5, mana: 100
+  bullets: [], fireRate: 300, lastFired: 0, hp: 5,
 };
-
-// Enemies
-let enemies = [];
-let currentRoom = 1;
 
 // Game loop
 function gameLoop(timestamp) {
@@ -51,64 +47,17 @@ function update(timestamp) {
   if (keys["ArrowLeft"] || keys["a"]) player.x -= player.speed;
   if (keys["ArrowRight"] || keys["d"]) player.x += player.speed;
 
-  // Fire bullet
-  if (mouse.down && timestamp - player.lastFired > player.fireRate && player.mana > 9) {
+  // Place block
+  if (mouse.down && timestamp - player.lastPlaced > player.fireRate) {
     const angle = Math.atan2(mouse.y - player.y, mouse.x - player.x);
-    player.bullets.push({
+    player.block.push({
       x: player.x, y: player.y,
       vx: Math.cos(angle) * 7,
       vy: Math.sin(angle) * 7,
       size: 5
     });
-    player.lastFired = timestamp;
-    player.mana -= 10;
+    player.lastPlaced = timestamp;
   }
-
-  // Update bullets
-  for (let b of player.bullets) {
-    b.x += b.vx;
-    b.y += b.vy;
-  }
-  player.bullets = player.bullets.filter(b => b.x > 0 && b.x < canvas.width && b.y > 0 && b.y < canvas.height);
-
-  // Update enemies
-  for (let e of enemies) {
-    const dx = player.x - e.x;
-    const dy = player.y - e.y;
-    const dist = Math.hypot(dx, dy);
-    e.x += (dx / dist) * e.speed;
-    e.y += (dy / dist) * e.speed;
-
-    // Collision with player
-    if (Math.hypot(player.x - e.x, player.y - e.y) < player.size / 2 + e.size / 2) {
-      player.hp--;
-      e.hit = true;
-    }
-  }
-  enemies = enemies.filter(e => !e.hit);
-
-  // Bullet hits
-  for (let b of player.bullets) {
-    for (let e of enemies) {
-      if (Math.hypot(b.x - e.x, b.y - e.y) < e.size) {
-        e.hit = true;
-        b.remove = true;
-      }
-    }
-  }
-  enemies = enemies.filter(e => !e.hit);
-  player.bullets = player.bullets.filter(b => !b.remove);
-
-  // Check room cleared
-  if (enemies.length === 0) {
-    currentRoom++;
-    spawnEnemies(currentRoom + 2);
-  }
-
-  if (player.mana < 100) {
-    player.mana = player.mana + .1;
-  }
-}
 
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -118,44 +67,13 @@ function draw() {
   ctx.beginPath();
   ctx.arc(player.x, player.y, player.size / 2, 0, Math.PI * 2);
   ctx.fill();
-
-  // Draw bullets
-  ctx.fillStyle = "orange";
-  for (let b of player.bullets) {
-    ctx.beginPath();
-    ctx.arc(b.x, b.y, b.size, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // Draw enemies
-  ctx.fillStyle = "red";
-  for (let e of enemies) {
-    ctx.beginPath();
-    ctx.arc(e.x, e.y, e.size, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
+  
   // HUD
   ctx.fillStyle = "#fff";
   ctx.font = "20px Arial";
   ctx.fillText("HP: " + player.hp, 20, 30);
-  ctx.fillText("Room: " + currentRoom, 20, 60);
-  ctx.fillText("Mana: " + player.mana, 20, 90);
 }
 
-function spawnEnemies(n) {
-  enemies = [];
-  for (let i = 0; i < n; i++) {
-    enemies.push({
-      x: Math.random() * canvas.width,
-      y: Math.random() * canvas.height,
-      size: 20,
-      speed: 1 + Math.random()
-    });
-  }
-}
-
-spawnEnemies(3);
 requestAnimationFrame(gameLoop);
 </script>
 </body>
